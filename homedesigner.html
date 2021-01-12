@@ -27,13 +27,49 @@ function v2(x, y)    { return new THREE.Vector2(x, y) }
 function v3(x, y, z) { return new THREE.Vector3(x, y, z) }
 function color(c)    { return new THREE.Color(c) }
 
-// globals
+// globals -------------------------------------------------------------------
 
 scene = new THREE.Scene()
 
 let camera, controls, renderer
 let raycaster, mouse, mouse_moved
 let tool
+
+// tools ---------------------------------------------------------------------
+
+let tools = {}
+
+tools.orbit = {}
+
+tools.orbit.pointermove = function(ev, mx, my) {
+	let cw = window.innerWidth
+	let ch = window.innerHeight
+	mouse = mouse || v2()
+	// calculate mouse position in normalized device coordinates
+	// (-1 to +1) for both components
+	mouse.x =   ( mx / cw ) * 2 - 1
+	mouse.y = - ( my / ch ) * 2 + 1
+}
+
+tools.line = {}
+
+tools.line.pointermove = function(ev, mx, my) {
+
+}
+
+tools.line.pointerdown = function(ev, mx, my) {
+	return this.capture_pointer(ev, so_pointermove)
+
+}
+
+function set_tool(name) {
+	tool = tools[name]
+	if (tool.init)
+		tool.init()
+	renderer.domElement.style.cursor = 'url(cursor_'+(tool.cursor || name)+'.png), auto'
+}
+
+// widgets -------------------------------------------------------------------
 
 function axis(x, y, z, color, dashed) {
 	let material = dashed
@@ -152,6 +188,8 @@ function dirlight() {
 	return e
 }
 
+// init ----------------------------------------------------------------------
+
 function animation( time ) {
 
 	controls.update()
@@ -201,15 +239,15 @@ function init() {
 
 	raycaster = new THREE.Raycaster()
 
-	e.on('pointermove', tool.pointermove)
-	e.on('pointerdown', tool.pointerdown)
+	set_tool('orbit')
 
-	function(ev, mx, my) {
-		mouse = mouse || v2()
-		// calculate mouse position in normalized device coordinates
-		// (-1 to +1) for both components
-		mouse.x =   ( mx / cw ) * 2 - 1
-		mouse.y = - ( my / ch ) * 2 + 1
+	e.on('pointermove', function(...args) {
+		if (tool.pointermove)
+			tool.pointermove(...args)
+	})
+	e.on('pointerdown', function(...args) {
+		if (tool.pointerdown)
+			tool.pointerdown(...args)
 	})
 
 }
