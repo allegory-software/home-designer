@@ -1,257 +1,40 @@
 <!DOCTYPE html>
+<html>
 <head>
 <script src="three.js"></script>
 <script src="three_orbit_controls.js"></script>
 <script src="glue.js"></script>
 <script src="divs.js"></script>
+<script src="x-widgets.js"></script>
+<script src="x-modeleditor.js"></script>
+<link rel="stylesheet" type="text/css" href="fontawesome.css">
+<link rel="stylesheet" type="text/css" href="x-widgets.css">
 <style>
-
 * { box-sizing: border-box; }
 
-body {
+html, body {
 	margin: 0;
 	padding: 0;
+	height: 100%;
+	display: grid;
+	flex-flow: column;
+	flex: 1;
+	position: relative;
+	overflow: hidden;
 }
-
 </style>
 </head>
 
 <body>
+
 </body>
 
 <script>
 
-// glue ----------------------------------------------------------------------
-
-function v2(x, y)    { return new THREE.Vector2(x, y) }
-function v3(x, y, z) { return new THREE.Vector3(x, y, z) }
-function color(c)    { return new THREE.Color(c) }
-
-// globals -------------------------------------------------------------------
-
-scene = new THREE.Scene()
-
-let camera, controls, renderer
-let raycaster, mouse, mouse_moved
-let tool
-
-// tools ---------------------------------------------------------------------
-
-let tools = {}
-
-tools.orbit = {}
-
-tools.orbit.pointermove = function(ev, mx, my) {
-	let cw = window.innerWidth
-	let ch = window.innerHeight
-	mouse = mouse || v2()
-	// calculate mouse position in normalized device coordinates
-	// (-1 to +1) for both components
-	mouse.x =   ( mx / cw ) * 2 - 1
-	mouse.y = - ( my / ch ) * 2 + 1
-}
-
-tools.line = {}
-
-tools.line.pointermove = function(ev, mx, my) {
-
-}
-
-tools.line.pointerdown = function(ev, mx, my) {
-	return this.capture_pointer(ev, so_pointermove)
-
-}
-
-function set_tool(name) {
-	tool = tools[name]
-	if (tool.init)
-		tool.init()
-	renderer.domElement.style.cursor = 'url(cursor_'+(tool.cursor || name)+'.png), auto'
-}
-
-// widgets -------------------------------------------------------------------
-
-function axis(x, y, z, color, dashed) {
-	let material = dashed
-		? new THREE.LineDashedMaterial({color: color, scale: 100, dashSize: 1, gapSize: 1})
-		: new THREE.LineBasicMaterial({color: color})
-	let geometry = new THREE.BufferGeometry().setFromPoints([
-		v3(  0,  0,  0),
-		v3(  x,  y,  z),
-	])
-	let line = new THREE.Line(geometry, material)
-	line.computeLineDistances()
-	return line
-}
-
-function axes() {
-	let M = 1e6
-	return [
-		axis( 0,  0, -M, 0x00ff00),
-		axis( M,  0,  0, 0xff0000),
-		axis( 0,  M,  0, 0x0000ff),
-		axis( 0,  0,  M, 0x00ff00, true),
-		axis(-M,  0,  0, 0xff0000, true),
-		axis( 0, -M,  0, 0x0000ff, true),
-	]
-}
-
-function skydome() {
-
-	let vshader = `
-
-		varying vec3 vWorldPosition;
-
-		void main() {
-
-			vec4 worldPosition = modelMatrix * vec4( position, 1.0 );
-			vWorldPosition = worldPosition.xyz;
-
-			gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-
-		}
-
-
-	`
-
-	let fshader = `
-
-		uniform vec3 topColor;
-		uniform vec3 bottomColor;
-		uniform float offset;
-		uniform float exponent;
-
-		varying vec3 vWorldPosition;
-
-		void main() {
-
-			float h = normalize( vWorldPosition + offset ).y;
-			gl_FragColor = vec4( mix( bottomColor, topColor, max( pow( max( h , 0.0), exponent ), 0.0 ) ), 1.0 );
-
-		}
-
-	`
-
-	let uniforms = {
-		topColor     : { value: color(0x9999cc)},
-		bottomColor  : { value: color(0xffffff)},
-		offset       : { value: 33},
-		exponent     : { value: .6},
-	}
-
-	let geo = new THREE.SphereBufferGeometry(1e6, 3, 0)
-	let mat = new THREE.ShaderMaterial({
-		uniforms       : uniforms,
-		vertexShader   : vshader,
-		fragmentShader : fshader,
-		side: THREE.BackSide,
-	})
-	return new THREE.Mesh(geo, mat)
-}
-
-function ground() {
-	let geo = new THREE.PlaneBufferGeometry(1e5, 1e5)
-	let mat = new THREE.MeshLambertMaterial({color: 0xffffff})
-	mat.color.setHSL(0.09, .6, 0.75)
-	let e = new THREE.Mesh(geo, mat)
-	e.position.y = - 33
-	e.rotation.x = - PI / 2
-	e.receiveShadow = true
-	return e
-}
-
-function hemlight() {
-	let e = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6)
-	e.color.setHSL(0.6, 1, 0.6)
-	e.groundColor.setHSL(0.095, 1, 0.75)
-	e.position.set(0, 50, 0)
-	return e
-}
-
-function dirlight() {
-	let e = new THREE.DirectionalLight(0xffffff, 1)
-	e.color.setHSL( 0.1, 1, 0.95 )
-	e.position.set( - 1, 1.75, 1 )
-	e.position.multiplyScalar( 30 )
-	/*
-	e.castShadow = true
-	e.shadow.mapSize.width = 2048
-	e.shadow.mapSize.height = 2048
-	let d = 50
-	e.shadow.camera.left = - d
-	e.shadow.camera.right = d
-	e.shadow.camera.top = d
-	e.shadow.camera.bottom = - d
-	e.shadow.camera.far = 3500;
-	e.shadow.bias = - 0.0001;
-	*/
-	return e
-}
-
-// init ----------------------------------------------------------------------
-
-function animation( time ) {
-
-	controls.update()
-
-	if (mouse) {
-		raycaster.setFromCamera(mouse, camera)
-		let intersects = raycaster.intersectObjects( scene.children )
-		for (let i = 0; i < intersects.length; i++) {
-			//intersects[i].object.material.color.set( 0xffffff )
-		}
-	}
-
-	renderer.render( scene, camera )
-
-}
-
-function init() {
-
-	let cw = window.innerWidth
-	let ch = window.innerHeight
-
-	camera = new THREE.PerspectiveCamera(70, cw / ch, 0.01, 1e6)
-	camera.position.x =  .2
-	camera.position.y =  .5
-	camera.position.z =  1.5
-	camera.rotation.x = -rad(10)
-	camera.rotation.y = -rad(30)
-
-	scene.add(skydome())
-	scene.add(ground())
-	scene.add(...axes())
-	scene.add(hemlight())
-	scene.add(dirlight())
-
-	renderer = new THREE.WebGLRenderer({antialias: true})
-	renderer.setPixelRatio(window.devicePixelRatio)
-	renderer.setSize(cw, ch)
-	renderer.outputEncoding = THREE.sRGBEncoding
-	renderer.shadowMap.enabled = true
-	renderer.setAnimationLoop(animation)
-
-	controls = new THREE.OrbitControls(camera, renderer.domElement)
-
-	let e = document.body
-
-	e.add(renderer.domElement)
-
-	raycaster = new THREE.Raycaster()
-
-	set_tool('orbit')
-
-	e.on('pointermove', function(...args) {
-		if (tool.pointermove)
-			tool.pointermove(...args)
-	})
-	e.on('pointerdown', function(...args) {
-		if (tool.pointerdown)
-			tool.pointerdown(...args)
-	})
-
-}
-
-init()
+window.on('load', function() {
+	let m = modeleditor()
+	document.body.add(m)
+})
 
 </script>
+</html>
