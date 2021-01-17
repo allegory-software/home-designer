@@ -1,0 +1,122 @@
+
+Basic Modeling
+------------------------------------------------------------------------------
+
+- line tool
+	- snap to axes
+	- snap to ref point
+	- line-line intersection
+	- overlapping lines cases
+	- polygon forming
+		- identify planes and make edge lists for each plane bounded by the new segments.
+		- make a rotation matrix for the plane (have a camera looking at the plane).
+			- compute 2D edge pseudo-angles in the plane matrix.
+		- exclude non-cycling edges in the region detection algorithm.
+		- find embedded polygons (holes)
+			- generate meshes with earclip
+		- replace existing polygons with new polygons while preserving textures
+- select faces and lines
+- double-click to select face boundary lines
+	- double-click again to select all lines and faces.
+- del to remove selection
+- move hit point
+- move selection
+- rotate selection
+- eraser tool
+- move axes
+- reverse selected faces
+- make group from selection
+- break group
+- make component
+
+- rectangle tool
+- arc tool
+- circle tool
+- push-pull tool
+
+-
+
+
+Parametric Architecture & Construction
+------------------------------------------------------------------------------
+
+- foundation
+- roofs
+- floors
+- ext walls
+- int walls
+- wall windows
+- wall doors
+- roof windows
+- terraces
+- suspended floors
+- decks
+- patios
+- fences
+- fence gates
+- built-in showers
+- furniture
+	- couches
+	- beds
+	- kitchen countertops
+		- embedded appliances
+	- kitchen cabinets
+	- bathroom countertops
+	- bookshelfs
+	- dinner tables with chairs
+	- lights
+		- wall lamps
+		- ceiling lamps
+		- ceiling embedded lights
+		- outdoor lights
+- systems
+	- electrical
+		- connect to lights, light switches, outlets.
+		- wiring plan
+		- grounding plan
+	- plumbing
+		- connect with showers, sinks, toilets, water radiators, water heaters,
+			instant gas furnaces, to-water heat pumps.
+		- water supply plumbing plan
+		- floor heating plan
+		- drain plumbing plan
+	- ventilation
+	- rebar
+	- radiator heating
+- site characteristics
+	- coords, slopes, load bearing capacity, frostline depth, etc.
+
+
+Outputs
+------------------------------------------------------------------------------
+
+- zoning requirements
+	- show site limits and window restrictions
+- energy input/output per month
+	- separate for heating, cooling, hot water, lighting, appliances
+- sun input based on orientation, region climate, altitude, shading profile.
+- shading study
+- excavation plan
+- bill of materials
+- bill of work (time & money)
+- optimized material cut plans
+- suply scheduling
+- work scheduling
+- construction phases dependency tree
+- electric schema with optimized load distribution
+- mechanical ventilation requirements
+
+
+Monetization
+------------------------------------------------------------------------------
+
+- acces to plans and reports
+- online shop of materials and services
+- for-authorization documentation
+- authorization service
+- a-to-z service on selected plans
+- a-to-z service on custom plans with consultancy
+- insurance service
+- custom materials, suppliers and prices
+- smart home kit
+
