@@ -5,16 +5,135 @@
 
 */
 
+// world constants -----------------------------------------------------------
 
 let MIND   = 0.001        // min line distance
 let MAXD   = 1e4          // max model total distance
 let MAXSD  = 0.001 ** 2   // max distance^2 for snapping
 let MAXISD = 0.00001 ** 2 // max distance^2 for intersections
 
+// region-finding algorithm --------------------------------------------------
+
+// The algorithm below is from the paper titled
+//   "An optimal algorithm for extracting the regions of a plane graph"
+//   X.Y. Jiang and H. Bunke, 1992.
+
+// return a number from the range [0..4] which is monotonic
+// in the angle that the input vector makes against the x axis.
+function v2_pseudo_angle(dx, dy) {
+	let p = dx / (abs(dx) + abs(dy))  // -1..1 increasing with x
+	return dy < 0 ? 3 + p : 1 - p     //  2..4 or 0..2 increasing with x
+}
+
+function plane_point_pseudo_angle(plane_normal, p1, p2) {
+	return v2_pseudo_angle(p2[0] - p1[0], p2[1] - p1[1])
+}
+
+function plane_regions(plane_normal, points, lines) {
+
+	// phase 1: find all wedges.
+
+	// step 1+2: make pairs of directed edges from all the edges and compute
+	// their angle-to-horizontal so that they can be then sorted by that angle.
+	let edges = [] // [[p1i, p2i, angle], ...]
+	let n = lines.length / 2
+	for (let i = 0; i < n; i++) {
+		let p1i = lines[2*i+0]
+		let p2i = lines[2*i+1]
+		let p1 = points[p1i]
+		let p2 = points[p2i]
+		edges.push(
+			[p1i, p2i, plane_point_pseudo_angle(plane_normal, p1, p2)],
+			[p2i, p1i, plane_point_pseudo_angle(plane_normal, p2, p1)])
+	}
+
+	// step 3: sort by edges by (p1, angle).
+	edges.sort(function(e1, e2) {
+		if (e1[0] == e2[0])
+			return e1[2] < e2[2] ? -1 : (e1[2] > e2[2] ? 1 : 0)
+		else
+			return e1[0] < e2[0] ? -1 : 1
+	})
+
+	// for (let e of edges) { print('e', e[0]+1, e[1]+1) }
+
+	// step 4: make wedges from edge groups formed by edges with the same p1.
+	let wedges = [] // [[p1i, p2i, p3i, used], ...]
+	let wedges_first_pi = edges[0][1]
+	for (let i = 0; i < edges.length; i++) {
+		let edge = edges[i]
+		let next_edge = edges[i+1]
+		let same_group = next_edge && edge[0] == next_edge[0]
+		if (same_group) {
+			wedges.push([edge[1], edge[0], next_edge[1], false])
+		} else {
+			wedges.push([edge[1], edge[0], wedges_first_pi, false])
+			wedges_first_pi = next_edge && next_edge[1]
+		}
+	}
+
+	// for (let w of wedges) { print('w', w[0]+1, w[1]+1, w[2]+1) }
+
+	// phase 2: group wedges into regions.
+
+	// step 1: sort wedges by (p1, p2) so we can binsearch them by the same key.
+	wedges.sort(function(w1, w2) {
+		if (w1[0] == w2[0])
+			return w1[1] < w2[1] ? -1 : (w1[1] > w2[1] ? 1 : 0)
+		else
+			return w1[0] < w2[0] ? -1 : 1
+	})
+
+	// for (let w of wedges) { print('w', w[0]+1, w[1]+1, w[2]+1) }
+
+	// step 2: mark all wedges as unused (already did on construction).
+	// step 3, 4, 5: find contiguous wedges and group them into regions.
+	// NOTE: the result also contans the outer region which goes clockwise
+	// while inner regions go anti-clockwise.
+	let regions = [] // [[p1i, p2i, ...], ...]
+	let k = [0, 0] // reusable (p1i, p2i) key for binsearch.
+	function cmp_wedges(w1, w2) { // binsearch comparator on wedge's (p1i, p2i).
+		return w1[0] == w2[0] ? w1[1] < w2[1] : w1[0] < w2[0]
+	}
+	for (let i = 0; i < wedges.length; i++) {
+		let w0 = wedges[i]
+		if (w0[3])
+			continue // skip wedges marked used
+		region = [w0[1]]
+		regions.push(region)
+		k[0] = w0[1]
+		k[1] = w0[2]
+		while (1) {
+			let i = wedges.binsearch(k, cmp_wedges)
+			let w = wedges[i]
+			region.push(w[1])
+			w[3] = true // mark used so we can skip it
+			if (w[1] == w0[0] && w[2] == w0[1]) // cycle complete.
+				break
+			k[0] = w[1]
+			k[1] = w[2]
+		}
+	}
+
+	// for (let r of regions) { print('r', r.map(i => i+1)) }
+
+	return regions
+}
+
+function test_plane_regions() {
+	let points = [[0, -5], [-10, 0], [10, 0], [-10, 5], [10, 5], [-5, 1], [5, 1], [-5, 4], [5, 4], [0, -1], [1, -2]]
+	let lines  = [0,1, 0,2,  1,2, 1,3, 2,4, 3,4,  5,6, 5,7, 6,8, 7,8,  0,9, 9,10]
+	let rt = plane_regions(null, points, lines)
+	for (let r of rt) { print(r.map(i => i+1)) }
+}
+test_plane_regions()
+
 // THREE extensions ----------------------------------------------------------
 
-THREE.Line3.closestLineToLine = function(line, clamp, out_line) {
-
+// returns the
+// returns null if lines are parallel.
+THREE.Line3.closestLine = function(line, clamp, out_line) {
+	//
 }
 
 // 3D glue -------------------------------------------------------------------
@@ -45,7 +164,7 @@ function point_array(size) {
 		len = len1
 	}
 
-	property(e, 'length', {get: () => len; set: setlen})
+	property(e, 'length', {get: () => len, set: setlen})
 
 	e.get = function(i, out) {
 		assert(i >= 0 && i < len)
@@ -209,7 +328,7 @@ function poly_array(e) {
 					int_line.end.copy(line.at(.5))
 				}
 				if (f)
-					f(int_line, sd)
+					f(int_line, line)
 				if (sd < min_sd) {
 					min_sd = sd
 					min_int_line = min_int_line || line3()
@@ -223,7 +342,6 @@ function poly_array(e) {
 
 	// return the line from closest line to target line
 	// with the line index in line.end.line_i.
-	// if the lines are parallel, line.parallel is set.
 	e.line_hit_lines = function(target_line, max_sd, f) {
 		max_sd = max_sd || MAXSD
 		let min_sd = 1/0
@@ -231,21 +349,33 @@ function poly_array(e) {
 		let int_line = line3()
 		let min_int_line
 		for (let i = 0; i < e.line_pis.length-1; i += 2) {
-			line.start = e.points.get(e.line_pis[i])
-			line.end   = e.points.get(e.line_pis[i+1])
-			let parallel = !target_line.closestLineToLine(line, true, int_line)
-			let sd = int_line.start.distanceToSquared(int_line.end)
-			if (sd <= max_sd) {
-				int_line.parallel = parallel
-				int_line.end.line_i = i
-				if (f)
-					f(int_line, sd)
-				if (sd < min_sd) {
-					min_sd = sd
-					min_int_line = min_int_line || line3()
-					min_int_line.copy(int_line)
-					min_int_line.end.line_i = i
-					min_int_line.parallel = int_line.parallel
+			let p1i = e.line_pis[i]
+			let p2i = e.line_pis[i+1]
+			line.start = e.points.get(p1i)
+			line.end   = e.points.get(p2i)
+			let tp1i = target_line.start.i
+			let tp2i = target_line.end.i
+			let touch1 = p1i == tp1i || p1i == tp2i
+			let touch2 = p2i == tp1i || p2i == tp2i
+			if (touch1 != touch2) {
+				// skip lines with a single endpoint common with the target line.
+			} else if (touch1 && touch2) {
+				//
+			} else {
+				let parallel = target_line.closestLine(line, true, int_line)
+				let sd = int_line.start.distanceToSquared(int_line.end)
+				if (sd <= max_sd) {
+					int_line.parallel = parallel
+					int_line.end.line_i = i
+					if (f)
+						f(int_line, line)
+					if (sd < min_sd) {
+						min_sd = sd
+						min_int_line = min_int_line || line3()
+						min_int_line.copy(int_line)
+						min_int_line.end.line_i = i
+						min_int_line.parallel = int_line.parallel
+					}
 				}
 			}
 		}
@@ -255,7 +385,15 @@ function poly_array(e) {
 	// line drawing in 3 stages: start, snap, add.
 
 	e.start_line = function(p) {
-		let p = e.points.point_hit(p)
+
+		let p1 = e.point_hit_points(p)
+		if (p1)
+			return p1
+
+		let int_line = e.point_hit_lines(p)
+		if (int_line)
+			return int_line.end
+
 		return line3(p, p)
 	}
 
@@ -278,7 +416,7 @@ function poly_array(e) {
 		}
 
 		// snap line to existing points preserving length.
-		let int_line = e.line_hit_points(line)
+		int_line = e.line_hit_points(line)
 		if (int_line) {
 			let d = line.distance()
 			let d1 = line.start.distanceTo(int_line.start)
@@ -300,10 +438,15 @@ function poly_array(e) {
 		let p1 = line.start
 		let p2 = line.end
 
+		// check for min. line length for lines with new endpoints.
+		if (p1.i == null || p2.i == null)
+			if (p1.distanceToSquared(p2) <= MAXISD)
+				return
+
 		let line_ps = [p1, p2] // line segments' points.
 
 		// cut the line into segments at intersections with existing points.
-		let line = line3(p1, p2)
+		line = line3(p1, p2)
 		e.line_hit_points(line, MAXISD, function(int_line) {
 			let p = int_line.start
 			let i = p.i
@@ -331,18 +474,23 @@ function poly_array(e) {
 		// the ones that do must be broken down further, and so must the
 		// existing lines that are cut by them.
 		let seg = line3()
-		let n = line_ps.length-1
-		for (let i = 0; i < n; i += 2) {
+		let line_ps_len = line_ps.length
+		for (let i = 0; i < line_ps_len-1; i += 2) {
 			seg.start = line_ps[i]
 			seg.end   = line_ps[i+1]
-			e.line_hit_lines(seg, MAXISD, function(int_line) {
+			e.line_hit_lines(seg, MAXISD, function(int_line, line) {
 				let p = int_line.end
+				//if (p.i != null) {
 				let line_i = p.line_i
 				p = p.clone()
 				p.line_i = line_i
 				line_ps.push(p)
 			})
 		}
+
+		// sort the points again if new points were added.
+		if (line_ps.length > line_ps_len)
+			sort_line_ps()
 
 		// create missing points.
 		for (let p of line_ps)
@@ -351,8 +499,8 @@ function poly_array(e) {
 
 		// create line segments.
 		for (let i = 0; i < line_ps.length-1; i += 2) {
-			let p1i = line_ps[i].i
-			let p2i = line_ps[i].i
+			let p1i = line_ps[i  ].i
+			let p2i = line_ps[i+1].i
 			e.line_pis.push(p1i, p2i)
 		}
 
@@ -565,7 +713,7 @@ component('x-modeleditor', function(e) {
 	function init_group(g) {
 		g.points = [] // [x1, y1, z1,...]
 		g.line_indices = [] //
-		g.vertices = new THREE.BufferAttribute(vertices, 3)
+		g.vertices = new THREE.BufferAttribute(g.points, 3)
 		g.lines_geometry = new THREE.BufferGeometry()
 		g.lines_geometry.setIndex(g.line_indices)
 		g.lines_geometry.setAttribute('position', g.vertices)
