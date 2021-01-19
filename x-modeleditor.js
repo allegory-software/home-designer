@@ -5,16 +5,23 @@
 
 */
 
-// world constants -----------------------------------------------------------
+// precision settings --------------------------------------------------------
 
 let MIND   = 0.001        // min line distance
 let MAXD   = 1e4          // max model total distance
 let MAXSD  = 0.001 ** 2   // max distance^2 for snapping
 let MAXISD = 0.00001 ** 2 // max distance^2 for intersections
 
+// primitive construction ----------------------------------------------------
+
+function v2(x, y)      { return new THREE.Vector2(x, y) }
+function v3(x, y, z)   { return new THREE.Vector3(x, y, z) }
+function line3(p1, p2) { return new THREE.Line3(p1, p2) }
+function color(c)      { return new THREE.Color(c) }
+
 // region-finding algorithm --------------------------------------------------
 
-// The algorithm below is from the paper titled
+// The algorithm below is O(n log n) and it's from the paper:
 //   "An optimal algorithm for extracting the regions of a plane graph"
 //   X.Y. Jiang and H. Bunke, 1992.
 
@@ -25,11 +32,7 @@ function v2_pseudo_angle(dx, dy) {
 	return dy < 0 ? 3 + p : 1 - p     //  2..4 or 0..2 increasing with x
 }
 
-function plane_point_pseudo_angle(plane_normal, p1, p2) {
-	return v2_pseudo_angle(p2[0] - p1[0], p2[1] - p1[1])
-}
-
-function plane_regions(plane_normal, points, lines) {
+function plane_regions(plane_normal, get_point, lines) {
 
 	// phase 1: find all wedges.
 
@@ -37,14 +40,16 @@ function plane_regions(plane_normal, points, lines) {
 	// their angle-to-horizontal so that they can be then sorted by that angle.
 	let edges = [] // [[p1i, p2i, angle], ...]
 	let n = lines.length / 2
+	let p1 = v3()
+	let p2 = v3()
 	for (let i = 0; i < n; i++) {
 		let p1i = lines[2*i+0]
 		let p2i = lines[2*i+1]
-		let p1 = points[p1i]
-		let p2 = points[p2i]
+		get_point(p1i, p1).projectOnPlane(plane_normal)
+		get_point(p2i, p2).projectOnPlane(plane_normal)
 		edges.push(
-			[p1i, p2i, plane_point_pseudo_angle(plane_normal, p1, p2)],
-			[p2i, p1i, plane_point_pseudo_angle(plane_normal, p2, p1)])
+			[p1i, p2i, v2_pseudo_angle(p2.x - p1.x, p2.y - p1.y)],
+			[p2i, p1i, v2_pseudo_angle(p1.x - p2.x, p1.y - p2.y)])
 	}
 
 	// step 3: sort by edges by (p1, angle).
@@ -121,48 +126,106 @@ function plane_regions(plane_normal, points, lines) {
 }
 
 function test_plane_regions() {
-	let points = [[0, -5], [-10, 0], [10, 0], [-10, 5], [10, 5], [-5, 1], [5, 1], [-5, 4], [5, 4], [0, -1], [1, -2]]
-	let lines  = [0,1, 0,2,  1,2, 1,3, 2,4, 3,4,  5,6, 5,7, 6,8, 7,8,  0,9, 9,10]
-	let rt = plane_regions(null, points, lines)
+	let points = [
+		v3(0, -5, 0),
+		v3(-10, 0, 0), v3(10, 0, 0), v3(-10, 5, 0), v3(10, 5, 0),
+		//v3(-5, 1, 0), v3(5,  1, 0), v3(-5, 4, 0), v3(5, 4, 0),
+		//v3(0, -1, 0), v3(1, -2, 0),
+	]
+	let get_point = function(i, out) { out.copy(points[i]); return out }
+	let lines  = [0,1, 0,2,  1,2, 1,3, 2,4, 3,4,  ] // 5,6, 5,7, 6,8, 7,8,  0,9, 9,10]
+	let rt = plane_regions(v3(0, 0, 1), get_point, lines)
 	for (let r of rt) { print(r.map(i => i+1)) }
 }
 test_plane_regions()
 
-// THREE extensions ----------------------------------------------------------
+// line-line-intersection ----------------------------------------------------
+
+/*
+function closestPointsDet( ) { // mp and mq  non-collinear
+
+	// using determinant
+
+ 	var qp = new THREE.Vector3( ).subVectors( p, q );
+
+	var qpDotmp = qp.dot( mp );
+	var qpDotmq = qp.dot( mq );
+	var mpDotmp = mp.dot( mp );
+	var mqDotmq = mq.dot( mq );
+	var mpDotmq = mp.dot( mq );
+
+	var detp = qpDotmp * mqDotmq - qpDotmq * mpDotmq;
+	var detq = qpDotmp * mpDotmq - qpDotmq * mpDotmp;
+
+	var detm = mpDotmq * mpDotmq - mqDotmq * mpDotmp;
+
+	pnDet = p.clone( ).add( mp.clone( ).multiplyScalar( detp / detm ) );
+	qnDet = q.clone( ).add( mq.clone( ).multiplyScalar( detq / detm ) );
+
+	dpnqnDet = pnDet.clone( ).sub( qnDet ).length( );
+
+}
+
+function closestPointsCross( ) { // mp and mq  non-collinear
+
+	// using cross vectors
+
+	var qp = new THREE.Vector3( ).subVectors( p, q );
+	var pq = qp.clone( ).multiplyScalar( -1 );
+
+	var npq = new THREE.Vector3( ).crossVectors( mp, mq ).normalize( );
+	var nqp = new THREE.Vector3( ).crossVectors( mq, mp ).normalize( );
+
+	var n1 = new THREE.Vector3( ).crossVectors( mp, nqp ).normalize( );
+	var n2 = new THREE.Vector3( ).crossVectors( mq, npq ).normalize( );
+
+	var qpDotn1 = qp.dot( n1 );
+	var pqDotn2 = pq.dot( n2 );
+
+	var mpDotn2 = mp.dot( n2 );
+	var mqDotn1 = mq.dot( n1 );
+
+	pnCr = p.clone( ).add( mp.clone( ).multiplyScalar( pqDotn2 / mpDotn2 ) );
+	qnCr = q.clone( ).add( mq.clone( ).multiplyScalar( qpDotn1 / mqDotn1 ) );
+
+	dpnqnCr = pnCr.clone( ).sub( qnCr ).length( );
+
+}
+*/
 
 // returns the
 // returns null if lines are parallel.
 THREE.Line3.closestLine = function(line, clamp, out_line) {
-	//
+
+
 }
 
-// 3D glue -------------------------------------------------------------------
+// dynamic point clouds ------------------------------------------------------
 
-function v2(x, y)      { return new THREE.Vector2(x, y) }
-function v3(x, y, z)   { return new THREE.Vector3(x, y, z) }
-function line3(p1, p2) { return new THREE.Line3(p1, p2) }
-function color(c)      { return new THREE.Color(c) }
-
-function point_array(size) {
-
-	size = size || 64
+function point_cloud(size) {
 
 	let e = {}
 	let a
 
+	function setsize(size1) {
+		size1 = nextpow2(size1)
+		let a1 = new Float32Array(size1 * 3)
+		if (a)
+			a1.set(a)
+		a = a1
+		size = size1
+		e.buffer_attribute = new THREE.BufferAttribute(a, 3)
+	}
+
 	let len = 0
 	function setlen(len1) {
 		assert(len1 >= 0)
-		if (size < len1) {
-			let size1 = nextpow2(len1)
-			let a1 = new Float32Array(size1 * 3)
-			if (a)
-				a1.set(a)
-			a = a1
-			size = size1
-		}
+		if (size < len1)
+			setsize(len1)
 		len = len1
 	}
+
+	setsize(or(size, 8))
 
 	property(e, 'length', {get: () => len, set: setlen})
 
@@ -185,6 +248,7 @@ function point_array(size) {
 		a[i*3  ] = p.x
 		a[i*3+1] = p.y
 		a[i*3+2] = p.z
+		e.buffer_attribute.needsUpdate = true
 	}
 
 	e.add = function(p) {
@@ -268,6 +332,18 @@ function point_array(size) {
 	return e
 }
 
+// editable polygon meshes ---------------------------------------------------
+
+// Polygon meshes are lists of polygons enclosed and connected by lines
+// defined over a common point cloud.
+
+// The editing API implements the direct manipulation UI and is designed to
+// perform automatic creation/removal/intersection of points/lines/polygons
+// while keeping the model numerically stable and clean. In particular:
+// - editing operations never leave duplicate points/lines/polygons.
+// - existing points are never moved when adding new geometry.
+// - when existing lines are cut, straightness is preserved to best accuracy.
+
 function material_db() {
 
 	let e = {}
@@ -279,13 +355,80 @@ function material_db() {
 	return e
 }
 
-function poly_array(e) {
+function triangle_plane_normal(p1, p2, p3) {
+	p2.sub(p1)
+	p3.sub(p1)
+	p2.cross(p3)
+	p2.normalize()
+	return p2.length() > .5 ? p2 : null
+}
+
+function poly_mesh(e) {
 
 	e = e || {}
 
-	e.points = point_array()
+	e.points = point_cloud()
 	e.line_pis = [] // [l1p1i, l1p2i, l2p1i, l2p2i, ...]
-	e.polys = [] // [[material: m, p1i, p2i, ...], ...]
+	e.polys = [] // [[material_id: mi, mesh: m, p1i, p2i, ...], ...]
+
+	e.group = new THREE.Group()
+
+	function poly_plane_normal(poly) {
+		if (!poly.plane_normal) {
+			assert(poly.length >= 3)
+			let p1 = v3()
+			let p2 = v3()
+			let p3 = v3()
+			for (let i = 2; i < poly.length; i++) {
+				e.points.get(poly[0], p1)
+				e.points.get(poly[1], p2)
+				e.points.get(poly[i], p3)
+				poly.plane_normal = triangle_plane_normal(p1, p2, p3)
+				if (poly.plane_normal)
+					break
+			}
+		}
+		return poly.plane_normal
+	}
+
+	let p = v3()
+	function get_x(poly, i) { return e.points.get(poly[i], p).projectOnPlane(poly.plane_normal).x }
+	function get_y(poly, i) { return e.points.get(poly[i], p).projectOnPlane(poly.plane_normal).y }
+
+	// length of output index array: 3 * (poly.length - 2)
+	function poly_triangulate(poly) {
+		if (!poly.triangle_pis) {
+			let plane_normal = poly_plane_normal()
+			let pis = EarcutIndices.triangulate(get_x, get_y, poly, null, 2)
+			for (let i = 0; i < pis.length; i++)
+				pis[i] = e.points[pis[i]]
+			poly.triangle_pis	= pis
+			poly.geometry.setIndex(poly.triangle_pis)
+		}
+	}
+
+	e.add_poly = function(poly) {
+		poly.material = new new THREE.MeshPhongMaterial(0xffffff)
+		poly.geometry = new THREE.BufferGeometry()
+		poly.geometry.setAttribute('position', e.points.buffer_attribute)
+		poly_triangulate()
+		poly.mesh = new THREE.Mesh(poly.geometry, poly.material)
+		e.polys.add(poly)
+		e.group.add(poly.mesh)
+	}
+
+	e.remove_poly = function(poly) {
+		e.group.remove(poly.mesh)
+		e.polys.remove_value(poly)
+	}
+
+	e.lines_geometry = new THREE.BufferGeometry()
+	e.lines_geometry.setAttribute('position', e.points.buffer_attribute)
+	e.lines_geometry.setIndex(e.line_pis)
+	e.lines_material = new THREE.LineBasicMaterial({color: 0xff00ff, polygonOffset: true})
+	e.lines = new THREE.LineSegments(e.lines_geometry, e.lines_material)
+
+	e.group.add(e.lines)
 
 	e.get_line = function(i, out) {
 		let p1i = e.line_pis[i]
@@ -516,7 +659,7 @@ function poly_array(e) {
 			}
 		}
 
-		//
+		e.lines_geometry.setIndex(e.line_pis)
 
 	}
 
@@ -535,12 +678,11 @@ function poly_array(e) {
 	return e
 }
 
-
 (function() {
 
 // graphics elements ---------------------------------------------------------
 
-function axis(x, y, z, color, dashed) {
+function axis(name, x, y, z, color, dashed) {
 	let material = dashed
 		? new THREE.LineDashedMaterial({color: color, scale: 100, dashSize: 1, gapSize: 1})
 		: new THREE.LineBasicMaterial({color: color})
@@ -550,18 +692,19 @@ function axis(x, y, z, color, dashed) {
 	])
 	let line = new THREE.Line(geometry, material)
 	line.computeLineDistances()
+	line.name = name
 	return line
 }
 
 function axes() {
 	let M = MAXD
 	return [
-		axis( 0,  0, -M, 0x00ff00),
-		axis( M,  0,  0, 0xff0000),
-		axis( 0,  M,  0, 0x0000ff),
-		axis( 0,  0,  M, 0x00ff00, true),
-		axis(-M,  0,  0, 0xff0000, true),
-		axis( 0, -M,  0, 0x0000ff, true),
+		axis('+z_axis',  0,  0, -M, 0x00ff00),
+		axis('+x_axis',  M,  0,  0, 0xff0000),
+		axis('+y_axis',  0,  M,  0, 0x0000ff),
+		axis('-z_axis',  0,  0,  M, 0x00ff00, true),
+		axis('-x_axis', -M,  0,  0, 0xff0000, true),
+		axis('-y_axis',  0, -M,  0, 0x0000ff, true),
 	]
 }
 
@@ -661,6 +804,7 @@ component('x-modeleditor', function(e) {
 	e.camera.rotation.y = -rad(30)
 
 	e.scene = new THREE.Scene()
+	e.scene.name = 'scene'
 	e.scene.add(skydome())
 	e.ground = ground()
 	e.scene.add(e.ground)
@@ -706,24 +850,21 @@ component('x-modeleditor', function(e) {
 
 	e.components = {} // {name->group}
 	e.model = new THREE.Group()
+	e.model.name = 'model'
+	e.scene.add(e.model)
 	e.group = e.model // currently editable group within the model
 
 	let helpers = new THREE.Group() // helper geometry for editor state
 
-	function init_group(g) {
-		g.points = [] // [x1, y1, z1,...]
-		g.line_indices = [] //
-		g.vertices = new THREE.BufferAttribute(g.points, 3)
-		g.lines_geometry = new THREE.BufferGeometry()
-		g.lines_geometry.setIndex(g.line_indices)
-		g.lines_geometry.setAttribute('position', g.vertices)
-		g.lines = new THREE.Lines(g.lines_geometry, g.lines_material)
+	let o = poly_mesh()
+	e.group.add(o.group)
 
-		g.faces_geometry = new THREE.BufferGeometry()
-		g.faces = new THREE.Mesh(g.faces_geometry, g.faces_material)
-	}
+	let line = o.start_line(v3(0, 0, 0))
+	line.end = v3(1, 1, -1)
+	//o.snap_line_end(line)
+	o.add_line(line)
 
-	init_group(e.group)
+	print(e.scene)
 
 	// tools ---------------------------------------------------------------------
 
@@ -766,17 +907,6 @@ component('x-modeleditor', function(e) {
 			})
 			return new THREE.Points(geo, mat)
 		}
-	}
-
-	function line(p, color) {
-		let material = new THREE.LineBasicMaterial({color: color || 0})
-		let geometry = new THREE.BufferGeometry().setFromPoints([
-			v3(  0,  0,  0),
-			v3(  x,  y,  z),
-		])
-		let line = new THREE.Line(geometry, material)
-		line.computeLineDistances()
-		return line
 	}
 
 	tools.line.pointerdown = function(e, ev, ht) {

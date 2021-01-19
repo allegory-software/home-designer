@@ -22,6 +22,7 @@ Basic Modeling
 - move hit point
 - move selection
 - rotate selection
+- scale selection
 - eraser tool
 - move axes
 - reverse selected faces
@@ -29,12 +30,41 @@ Basic Modeling
 - break group
 - make component
 
-- rectangle tool
-- arc tool
-- circle tool
 - push-pull tool
+- offset tool
+- follow-me tool
 
--
+- shape tools
+	- rectangle
+	- rotated rectangle
+	- arc (4 parametrizations)
+	- circle
+	- polygon
+
+- boolean algebra tools
+	- outer shell
+	- union
+	- intersect
+	- substract
+	- trim
+	- split
+
+- material tools
+	- fill
+	- eyedropper
+
+- camera tools
+	- modify orbit tool
+	- first-person / third-person walker on defined-walkable surfaces
+		- record walking sessions
+	- auto-generate cameras in good places
+	- inter-camera tweening
+	- keyframe animations
+	- scenes (camera + settings sets)
+
+- TODO: procedural parametric objects editor.
+
+- TODO: mapping object parameters to direct-manipulation UI helpers.
 
 
 Parametric Architecture & Construction
@@ -87,14 +117,60 @@ Parametric Architecture & Construction
 	- coords, slopes, load bearing capacity, frostline depth, etc.
 
 
+Inputs
+------------------------------------------------------------------------------
+
+- geographic data
+	- avg. daily day/night temperatures
+	- avg. daily solar input
+	- soil freeze depth
+	- lateral loads from seismic zone map
+	- snow loads
+- topographic data
+	- land shape, slopes, orientation
+	- sides with road access
+- soil data
+	- layers and their load bearing capacity
+- zoning requirements
+	- setbacks
+	- max height
+	- window placement restrictions
+- house plan
+	- elevations (shape + elevation)
+	- elevation partitions => surfaces
+	- surface type flag
+		- indoor: livingroom, bedroom, bathroom, kitchen, techroom, garage
+		- outdoor: terrace, deck, patio, lawn, walkway, car walkway, garden
+	- contour type flag
+		- wall, fence
+	- contour openings
+		- window, door, gate, stair
+			- door/gate height
+			- window height-to-top, height-to-bottom, min height, max height, fixed height.
+	- stairs: connect elevations at contour or inside
+	- roofs
+		- roof ridge lines
+			- ridge height, length, orientation 90deg snapped
+		- slope angles
+		- overhang offset
+		- gabled/hipped ends
+		- soffited overhangs
+		- rake and fascia design
+		- gutter system
+	- foundations
+		- type
+		- walls and pillars based on load-bearign walls
+		- sizing and rebar based on loads
+
+
 Outputs
 ------------------------------------------------------------------------------
 
 - zoning requirements
 	- show site limits and window restrictions
-- energy input/output per month
+- energy losses/gains estimated per month
 	- separate for heating, cooling, hot water, lighting, appliances
-- sun input based on orientation, region climate, altitude, shading profile.
+- sun energy input based on orientation, geography, shading, glazing.
 - shading study
 - excavation plan
 - bill of materials
@@ -104,7 +180,17 @@ Outputs
 - work scheduling
 - construction phases dependency tree
 - electric schema with optimized load distribution
-- mechanical ventilation requirements
+- mechanical ventilation requirements based on house air tightness
+- worksheets
+	- steel rebar bending
+	- board cutting
+	- wood cutting
+- gant chart
+- render house at different building stages
+- keep a building log / checklist
+- solutions pros/cons tables
+- price comparisons
+- centralized maintenance schedule
 
 
 Monetization
@@ -113,10 +199,35 @@ Monetization
 - acces to plans and reports
 - online shop of materials and services
 - for-authorization documentation
+- geo study service
 - authorization service
 - a-to-z service on selected plans
 - a-to-z service on custom plans with consultancy
 - insurance service
 - custom materials, suppliers and prices
 - smart home kit
+
+
+Web Advantages
+------------------------------------------------------------------------------
+
+- phone data entry & reporting
+- leverage x-widgets, three.js
+- information sharing
+- component sharing (from vendors etc. with metadata incl. price etc., auto-updated as well)
+- built-in communication
+- auto-updates
+- auto-upgrade model files to latest format
+	- still need backward compat for export formats.
+
+
+Desktop Advantages
+------------------------------------------------------------------------------
+
+- developer control over performance and tech used:
+	- 3D engine
+	- hardware integration
+- easier programming with integrated frontend and backend
+- user ownership of both program and data
+	- though susceptible to bit rot unless open-sourced and maintained.
 
