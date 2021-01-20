@@ -5,11 +5,13 @@
 
 */
 
+(function() {
+
 // precision settings --------------------------------------------------------
 
 let MIND   = 0.001        // min line distance
 let MAXD   = 1e4          // max model total distance
-let MAXSD  = 0.001 ** 2   // max distance^2 for snapping
+let MAXSD  = 0.03 ** 2    // max distance^2 for snapping
 let MAXISD = 0.00001 ** 2 // max distance^2 for intersections
 
 // primitive construction ----------------------------------------------------
@@ -141,196 +143,62 @@ test_plane_regions()
 
 // line-line-intersection ----------------------------------------------------
 
+// returns the smallest line that connects two lines, be they coplanar or skewed.
+function line_to_line_intersection(l1, l2, out_line) {
+
+	let p = l1.start
+	let q = l2.start
+	let mp = l1.delta()
+	let mq = l2.delta()
+
+	var qp = v3().subVectors(p, q)
+
+	var qpDotmp = qp.dot(mp)
+	var qpDotmq = qp.dot(mq)
+	var mpDotmp = mp.dot(mp)
+	var mqDotmq = mq.dot(mq)
+	var mpDotmq = mp.dot(mq)
+
+	var detp = qpDotmp * mqDotmq - qpDotmq * mpDotmq
+	var detq = qpDotmp * mpDotmq - qpDotmq * mpDotmp
+
+	var detm = mpDotmq * mpDotmq - mqDotmq * mpDotmp
+
+	let p1 = p.clone().add(mp.clone().multiplyScalar(detp / detm))
+	let p2 = q.clone().add(mq.clone().multiplyScalar(detq / detm))
+
+	if (out_line) {
+		out_line.start = p1
+		out_line.end   = p2
+	} else {
+		out_line = line3(p1, p2)
+	}
+
+	return out_line
+}
+
 /*
-function closestPointsDet( ) { // mp and mq  non-collinear
+	// alt. impl using cross vectors
 
-	// using determinant
+	let qp = v3().subVectors(p, q)
+	let pq = qp.clone().multiplyScalar(-1)
 
- 	var qp = new THREE.Vector3( ).subVectors( p, q );
+	let npq = v3().crossVectors(mp, mq).normalize()
+	let nqp = v3().crossVectors(mq, mp).normalize()
 
-	var qpDotmp = qp.dot( mp );
-	var qpDotmq = qp.dot( mq );
-	var mpDotmp = mp.dot( mp );
-	var mqDotmq = mq.dot( mq );
-	var mpDotmq = mp.dot( mq );
+	let n1 = v3().crossVectors(mp, nqp).normalize()
+	let n2 = v3().crossVectors(mq, npq).normalize()
 
-	var detp = qpDotmp * mqDotmq - qpDotmq * mpDotmq;
-	var detq = qpDotmp * mpDotmq - qpDotmq * mpDotmp;
+	let qpDotn1 = qp.dot(n1)
+	let pqDotn2 = pq.dot(n2)
 
-	var detm = mpDotmq * mpDotmq - mqDotmq * mpDotmp;
+	let mpDotn2 = mp.dot(n2)
+	let mqDotn1 = mq.dot(n1)
 
-	pnDet = p.clone( ).add( mp.clone( ).multiplyScalar( detp / detm ) );
-	qnDet = q.clone( ).add( mq.clone( ).multiplyScalar( detq / detm ) );
+	let p1 = p.clone().add(mp.clone().multiplyScalar(pqDotn2 / mpDotn2))
+	let p2 = q.clone().add(mq.clone().multiplyScalar(qpDotn1 / mqDotn1))
 
-	dpnqnDet = pnDet.clone( ).sub( qnDet ).length( );
-
-}
-
-function closestPointsCross( ) { // mp and mq  non-collinear
-
-	// using cross vectors
-
-	var qp = new THREE.Vector3( ).subVectors( p, q );
-	var pq = qp.clone( ).multiplyScalar( -1 );
-
-	var npq = new THREE.Vector3( ).crossVectors( mp, mq ).normalize( );
-	var nqp = new THREE.Vector3( ).crossVectors( mq, mp ).normalize( );
-
-	var n1 = new THREE.Vector3( ).crossVectors( mp, nqp ).normalize( );
-	var n2 = new THREE.Vector3( ).crossVectors( mq, npq ).normalize( );
-
-	var qpDotn1 = qp.dot( n1 );
-	var pqDotn2 = pq.dot( n2 );
-
-	var mpDotn2 = mp.dot( n2 );
-	var mqDotn1 = mq.dot( n1 );
-
-	pnCr = p.clone( ).add( mp.clone( ).multiplyScalar( pqDotn2 / mpDotn2 ) );
-	qnCr = q.clone( ).add( mq.clone( ).multiplyScalar( qpDotn1 / mqDotn1 ) );
-
-	dpnqnCr = pnCr.clone( ).sub( qnCr ).length( );
-
-}
 */
-
-// returns the
-// returns null if lines are parallel.
-THREE.Line3.closestLine = function(line, clamp, out_line) {
-
-
-}
-
-// dynamic point clouds ------------------------------------------------------
-
-function point_cloud(size) {
-
-	let e = {}
-	let a
-
-	function setsize(size1) {
-		size1 = nextpow2(size1)
-		let a1 = new Float32Array(size1 * 3)
-		if (a)
-			a1.set(a)
-		a = a1
-		size = size1
-		e.buffer_attribute = new THREE.BufferAttribute(a, 3)
-	}
-
-	let len = 0
-	function setlen(len1) {
-		assert(len1 >= 0)
-		if (size < len1)
-			setsize(len1)
-		len = len1
-	}
-
-	setsize(or(size, 8))
-
-	property(e, 'length', {get: () => len, set: setlen})
-
-	e.get = function(i, out) {
-		assert(i >= 0 && i < len)
-		if (out) {
-			out.x = a[i*3]
-			out.y = a[i*3+1]
-			out.z = a[i*3+2]
-		} else {
-			out = v3(a[i*3], a[i*3+1], a[i*3+2])
-		}
-		out.i = i
-		return out
-	}
-
-	e.set = function(i, p) {
-		assert(i >= 0)
-		setlen(max(i+1, len))
-		a[i*3  ] = p.x
-		a[i*3+1] = p.y
-		a[i*3+2] = p.z
-		e.buffer_attribute.needsUpdate = true
-	}
-
-	e.add = function(p) {
-		e.set(len, p)
-		return len-1
-	}
-
-	e.insert = function(i, p) {
-		assert(false) // TODO
-	}
-
-	e.remove = function(i) {
-		assert(i >= 0 && i < len)
-		if (i+1 < len) {
-			assert(false) // TODO
-		}
-		len--
-	}
-
-	e.find = function(p) {
-		for (let i = 0; i < len; i++)
-		if (a[i*3] == p.x && a[i*3+1] == p.y && a[i*3+2] == p.z)
-			return i
-	}
-
-	// hit-testing
-
-	// return the closest point to target point with the point index in p.i.
-	e.point_hit = function(target_p, max_sd, f) {
-		max_sd = max_sd || MAXSD
-		let min_sd = 1/0
-		let min_p
-		let p = v3()
-		for (let i = 0; i < len; i++) {
-			let sd = e.get(i, p).distanceToSquared(target_p)
-			if (sd <= max_sd) {
-				if (f)
-					f(p, sd)
-				if (sd < min_sd) {
-					min_sd = sd
-					min_p = min_p || v3()
-					min_p.copy(p)
-					min_p.i = i
-				}
-			}
-		}
-		return min_p
-	}
-
-	// return the line from closest point to target line
-	// with the point index in line.start.i.
-	e.line_hit = function(target_line, max_sd, f) {
-		max_sd = max_sd || MAXSD
-		let min_sd = 1/0
-		let int_line = line3()
-		let min_int_line
-		let p1 = int_line.start
-		let p2 = int_line.end
-		for (let i = 0; i < len; i++) {
-			e.get(i, p1)
-			target_line.closestPointToPoint(p1, true, p2)
-			let sd = p1.distanceToSquared(p2)
-			if (sd <= max_sd) {
-				//let t = target_line.closestPointToPointParameter(p1, true)
-				//int_line.end = t
-				if (f)
-					f(int_line, sd)
-				if (sd < min_sd) {
-					min_sd = sd
-					min_int_line = min_int_line || line3()
-					min_int_line.start.copy(p1)
-					min_int_line.end.copy(p2)
-					min_int_line.start.i = i
-					//min_int_line.end.t = t
-				}
-			}
-		}
-		return min_int_line
-	}
-
-	return e
-}
 
 // editable polygon meshes ---------------------------------------------------
 
@@ -367,11 +235,31 @@ function poly_mesh(e) {
 
 	e = e || {}
 
-	e.points = point_cloud()
+	e.point_coords = [] // [p1x, p1y, p1z, p2x, ...]
 	e.line_pis = [] // [l1p1i, l1p2i, l2p1i, l2p2i, ...]
-	e.polys = [] // [[material_id: mi, mesh: m, p1i, p2i, ...], ...]
+	e.polys = [] // [[material_id: mi, plane_normal: p, triangle_pis: [t1p1i, ...], p1i, p2i, ...], ...]
 
-	e.group = new THREE.Group()
+	e.points_len = () => e.point_coords.length / 3
+	e.lines_len = () => e.line_pis.length / 2
+
+	e.get_point = function(i, out) {
+		out = out || v3()
+		out.x = e.point_coords[3*i+0]
+		out.y = e.point_coords[3*i+1]
+		out.z = e.point_coords[3*i+2]
+		out.i = i
+		return out
+	}
+
+	e.get_line = function(i, out) {
+		let p1i = e.line_pis[2*i+0]
+		let p2i = e.line_pis[2*i+1]
+		out = out || line3()
+		e.get_point(p1i, out.start)
+		e.get_point(p2i, out.end)
+		out.i = i
+		return out
+	}
 
 	function poly_plane_normal(poly) {
 		if (!poly.plane_normal) {
@@ -380,9 +268,9 @@ function poly_mesh(e) {
 			let p2 = v3()
 			let p3 = v3()
 			for (let i = 2; i < poly.length; i++) {
-				e.points.get(poly[0], p1)
-				e.points.get(poly[1], p2)
-				e.points.get(poly[i], p3)
+				e.get_point(poly[0], p1)
+				e.get_point(poly[1], p2)
+				e.get_point(poly[i], p3)
 				poly.plane_normal = triangle_plane_normal(p1, p2, p3)
 				if (poly.plane_normal)
 					break
@@ -391,65 +279,83 @@ function poly_mesh(e) {
 		return poly.plane_normal
 	}
 
-	let p = v3()
-	function get_x(poly, i) { return e.points.get(poly[i], p).projectOnPlane(poly.plane_normal).x }
-	function get_y(poly, i) { return e.points.get(poly[i], p).projectOnPlane(poly.plane_normal).y }
-
-	// length of output index array: 3 * (poly.length - 2)
-	function poly_triangulate(poly) {
+	// length of output index array is always: 3 * (poly.length - 2).
+	function triangulate_poly(poly) {
 		if (!poly.triangle_pis) {
 			let plane_normal = poly_plane_normal()
-			let pis = EarcutIndices.triangulate(get_x, get_y, poly, null, 2)
+			let ps = []
+			let p = v3()
+			for (let pi of poly) {
+				let x = e.get_point(pi, p).projectOnPlane(plane_normal).x
+				let y = e.get_point(pi, p).projectOnPlane(plane_normal).y
+				ps.push(x, y)
+			}
+			let pis = Earcut.triangulate(ps, null, 2)
 			for (let i = 0; i < pis.length; i++)
-				pis[i] = e.points[pis[i]]
+				pis[i] = e.poly[pis[i]]
 			poly.triangle_pis	= pis
-			poly.geometry.setIndex(poly.triangle_pis)
 		}
-	}
-
-	e.add_poly = function(poly) {
-		poly.material = new new THREE.MeshPhongMaterial(0xffffff)
-		poly.geometry = new THREE.BufferGeometry()
-		poly.geometry.setAttribute('position', e.points.buffer_attribute)
-		poly_triangulate()
-		poly.mesh = new THREE.Mesh(poly.geometry, poly.material)
-		e.polys.add(poly)
-		e.group.add(poly.mesh)
-	}
-
-	e.remove_poly = function(poly) {
-		e.group.remove(poly.mesh)
-		e.polys.remove_value(poly)
-	}
-
-	e.lines_geometry = new THREE.BufferGeometry()
-	e.lines_geometry.setAttribute('position', e.points.buffer_attribute)
-	e.lines_geometry.setIndex(e.line_pis)
-	e.lines_material = new THREE.LineBasicMaterial({color: 0xff00ff, polygonOffset: true})
-	e.lines = new THREE.LineSegments(e.lines_geometry, e.lines_material)
-
-	e.group.add(e.lines)
-
-	e.get_line = function(i, out) {
-		let p1i = e.line_pis[i]
-		let p2i = e.line_pis[i+1]
-		out = out || line3()
-		e.points.get(p1i, out.start)
-		e.points.get(p2i, out.end)
-		return out
 	}
 
 	// hit-testing
 
-	e.point_hit_points = function(target_p, max_d, f) {
-		return e.points.point_hit(target_p, max_d, f)
+	// return the closest point to target point with the point index in p.i.
+	e.point_hit_points = function(target_p, max_sd, f) {
+		max_sd = max_sd || MAXSD
+		let min_sd = 1/0
+		let min_p
+		let p = v3()
+		for (let i = 0, len = e.points_len(); i < len; i++) {
+			let sd = e.get_point(i, p).distanceToSquared(target_p)
+			if (sd <= max_sd) {
+				if (f)
+					f(p, sd)
+				if (sd < min_sd) {
+					min_sd = sd
+					min_p = min_p || v3()
+					min_p.copy(p)
+					min_p.i = i
+				}
+			}
+		}
+		return min_p
 	}
 
-	e.line_hit_points = function(target_line, max_d, f) {
-		return e.points.line_hit(target_line, max_d, f)
+	// return the line from target line to its closest point
+	// with the point index in line.end.i.
+	e.line_hit_points = function(target_line, max_sd, f) {
+		max_sd = max_sd || MAXSD
+		let min_sd = 1/0
+		let int_line = line3()
+		let min_int_line
+		let p1 = int_line.start
+		let p2 = int_line.end
+		let i1 = target_line.start.i
+		let i2 = target_line.end.i
+		for (let i = 0, len = e.points_len(); i < len; i++) {
+			if (i == i1 || i == i2) // don't hit target line's points
+				continue
+			e.get_point(i, p2)
+			target_line.closestPointToPoint(p2, true, p1)
+			let sd = p1.distanceToSquared(p2)
+			if (sd <= max_sd) {
+				//p1.t = target_line.closestPointToPointParameter(p2, true)
+				if (f)
+					f(int_line, sd)
+				if (sd < min_sd) {
+					min_sd = sd
+					min_int_line = min_int_line || line3()
+					min_int_line.start.copy(p1)
+					min_int_line.end.copy(p2)
+					min_int_line.end.i = i
+					//min_int_line.start.t = p1.t
+				}
+			}
+		}
+		return min_int_line
 	}
 
-	// return the line from closest line to target point
+	// return the line from target point to its closest line
 	// with the line index in line.end.line_i.
 	e.point_hit_lines = function(target_p, max_sd, f) {
 		max_sd = max_sd || MAXSD
@@ -458,9 +364,8 @@ function poly_mesh(e) {
 		let int_line = line3()
 		int_line.start.copy(target_p)
 		let min_int_line
-		for (let i = 0; i < e.line_pis.length-1; i += 2) {
-			line.start = e.points.get(e.line_pis[i])
-			line.end   = e.points.get(e.line_pis[i+1])
+		for (let i = 0, len = e.lines_len(); i < len; i++) {
+			e.get_line(i, line)
 			line.closestPointToPoint(target_p, true, int_line.end)
 			let sd = target_p.distanceToSquared(int_line.end)
 			if (sd <= max_sd) {
@@ -483,7 +388,7 @@ function poly_mesh(e) {
 		return min_int_line
 	}
 
-	// return the line from closest line to target line
+	// return the line from target line to its closest line
 	// with the line index in line.end.line_i.
 	e.line_hit_lines = function(target_line, max_sd, f) {
 		max_sd = max_sd || MAXSD
@@ -491,11 +396,10 @@ function poly_mesh(e) {
 		let line = line3()
 		let int_line = line3()
 		let min_int_line
-		for (let i = 0; i < e.line_pis.length-1; i += 2) {
-			let p1i = e.line_pis[i]
-			let p2i = e.line_pis[i+1]
-			line.start = e.points.get(p1i)
-			line.end   = e.points.get(p2i)
+		for (let i = 0, len = e.lines_len(); i < len; i++) {
+			e.get_line(i, line)
+			let p1i = line.start.i
+			let p2i = line.end.i
 			let tp1i = target_line.start.i
 			let tp2i = target_line.end.i
 			let touch1 = p1i == tp1i || p1i == tp2i
@@ -505,7 +409,8 @@ function poly_mesh(e) {
 			} else if (touch1 && touch2) {
 				//
 			} else {
-				let parallel = target_line.closestLine(line, true, int_line)
+				let parallel
+				line_to_line_intersection(target_line, line, int_line)
 				let sd = int_line.start.distanceToSquared(int_line.end)
 				if (sd <= max_sd) {
 					int_line.parallel = parallel
@@ -531,28 +436,30 @@ function poly_mesh(e) {
 
 		let p1 = e.point_hit_points(p)
 		if (p1)
-			return p1
+			return line3(p1, p1.clone())
 
 		let int_line = e.point_hit_lines(p)
 		if (int_line)
-			return int_line.end
+			return line3(int_line.end, int_line.end.clone())
 
-		return line3(p, p)
+		return line3(p, p.clone())
 	}
 
 	e.snap_line_end = function(line, ref_p) {
+
 		line.end.i = null
 		line.end.line_i = null
 
 		// snap line end to existing points.
-		let int_p = e.point_hit_points(line.end)
+		let int_p = e.point_hit_points(line.end, MAXSD / e.camera.zoom)
 		if (int_p) {
 			line.end = int_p
 			return
 		}
 
 		// snap line end to existing lines.
-		let int_line = e.point_hit_lines(line.end)
+		print(e.camera.zoom)
+		let int_line = e.point_hit_lines(line.end, MAXSD / e.camera.zoom)
 		if (int_line) {
 			line.end = int_line.end
 			return
@@ -562,8 +469,8 @@ function poly_mesh(e) {
 		int_line = e.line_hit_points(line)
 		if (int_line) {
 			let d = line.distance()
-			let d1 = line.start.distanceTo(int_line.start)
-			line.end = int_line.start
+			let d1 = line.start.distanceTo(int_line.end)
+			line.end = int_line.end
 			line.end = line.at(d / d1)
 		}
 
@@ -586,7 +493,7 @@ function poly_mesh(e) {
 			if (p1.distanceToSquared(p2) <= MAXISD)
 				return
 
-		let line_ps = [p1, p2] // line segments' points.
+		let line_ps = [p1, p2] // line's points as an open polygon.
 
 		// cut the line into segments at intersections with existing points.
 		line = line3(p1, p2)
@@ -618,12 +525,11 @@ function poly_mesh(e) {
 		// existing lines that are cut by them.
 		let seg = line3()
 		let line_ps_len = line_ps.length
-		for (let i = 0; i < line_ps_len-1; i += 2) {
+		for (let i = 0; i < line_ps_len-1; i++) {
 			seg.start = line_ps[i]
 			seg.end   = line_ps[i+1]
-			e.line_hit_lines(seg, MAXISD, function(int_line, line) {
+			e.line_hit_lines(seg, MAXISD, function(int_line, line, sd) {
 				let p = int_line.end
-				//if (p.i != null) {
 				let line_i = p.line_i
 				p = p.clone()
 				p.line_i = line_i
@@ -637,48 +543,89 @@ function poly_mesh(e) {
 
 		// create missing points.
 		for (let p of line_ps)
-			if (p.i == null)
-				p.i = e.points.add(p)
+			if (p.i == null) {
+				e.point_coords.push(p.x, p.y, p.z)
+				p.i = e.points_len() - 1
+				print('point', p.i)
+			}
 
 		// create line segments.
-		for (let i = 0; i < line_ps.length-1; i += 2) {
+		for (let i = 0, len = line_ps.length; i < len-1; i++) {
 			let p1i = line_ps[i  ].i
 			let p2i = line_ps[i+1].i
 			e.line_pis.push(p1i, p2i)
+			print('line', p1i, p2i)
 		}
 
 		// cut intersecting lines in two.
 		for (let p of line_ps) {
 			if (p.line_i != null) {
-				let p1i = e.line_pis[p.line_i  ]
-				let p2i = e.line_pis[p.line_i+1]
+				let p1i = e.line_pis[2*p.line_i  ]
+				let p2i = e.line_pis[2*p.line_i+1]
 				let pmi = p.i
-				e.line_pis[p.line_i  ] = p1i
-				e.line_pis[p.line_i+1] = pmi
+				e.line_pis[2*p.line_i  ] = p1i
+				e.line_pis[2*p.line_i+1] = pmi
 				e.line_pis.push(pmi, p2i)
 			}
 		}
 
-		e.lines_geometry.setIndex(e.line_pis)
-
+		invalidate()
 	}
 
 	e.remove_line = function(line_i) {
 		//
+		invalidate()
 	}
 
 	e.move_line = function(line_i, rel_p) {
 		//
+		invalidate()
 	}
 
 	e.move_point = function(p_i, rel_p) {
 		//
+		invalidate()
+	}
+
+	e.remove_poly = function(poly) {
+		if (e.polys.remove_value(poly))
+			invalidate()
+	}
+
+	// rendering
+
+	e.group = new THREE.Group()
+	e.group.poly_mesh = e
+	e.group.name = e.name
+
+	function invalidate() {
+
+		e.group.clear()
+
+		let points = new THREE.BufferAttribute(new Float32Array(e.point_coords), 3)
+
+		{
+			let geo = new THREE.BufferGeometry()
+			geo.setAttribute('position', points)
+			geo.setIndex(e.line_pis)
+			mat = new THREE.LineBasicMaterial({color: 0xff00ff, polygonOffset: true})
+			let lines = new THREE.LineSegments(geo, mat)
+			e.group.add(lines)
+		}
+
+		for (let poly of e.polys) {
+			triangulate_poly(poly)
+			let geo = new THREE.BufferGeometry()
+			geo.setAttribute('position', points)
+			let mat = new THREE.MeshPhongMaterial(0xffffff)
+			let mesh = new THREE.Mesh(geo, mat)
+			e.group.add(mesh)
+		}
+
 	}
 
 	return e
 }
-
-(function() {
 
 // graphics elements ---------------------------------------------------------
 
@@ -790,6 +737,25 @@ function dirlight() {
 	return e
 }
 
+function line3d(line) {
+	let p1 = line.start
+	let p2 = line.end
+	// let points = [p1.x, p1.y, p1.z, p2.x, p2.y, p2.z]
+	let geo = new THREE.BufferGeometry().setFromPoints([p1, p2])
+	let mat = new THREE.LineBasicMaterial({color: 0xff00ff, polygonOffset: true})
+	let e = new THREE.Line(geo, mat)
+	e.line = line
+	e.update = function() {
+		let p1 = line.start
+		let p2 = line.end
+		let pb = geo.attributes.position
+		pb.setXYZ(0, p1.x, p1.y, p1.z)
+		pb.setXYZ(1, p2.x, p2.y, p2.z)
+		pb.needsUpdate = true
+	}
+	return e
+}
+
 // editor --------------------------------------------------------------------
 
 component('x-modeleditor', function(e) {
@@ -840,10 +806,14 @@ component('x-modeleditor', function(e) {
 		//if (on) resized(e.rect())
 	})
 
+	let cursor_x = {line:  0}
+	let cursor_y = {line: 25}
 	let cursor
 	e.property('cursor', () => cursor, function(name) {
 		cursor = name
-		e.canvas.style.cursor = 'url(cursor_'+name+'.png), auto'
+		let x = cursor_x[name] || 0
+		let y = cursor_y[name] || 0
+		e.canvas.style.cursor = 'url(cursor_'+name+'.png) '+x+' '+y+', auto'
 	})
 
 	// model ------------------------------------------------------------------
@@ -852,23 +822,38 @@ component('x-modeleditor', function(e) {
 	e.model = new THREE.Group()
 	e.model.name = 'model'
 	e.scene.add(e.model)
-	e.group = e.model // currently editable group within the model
+	e.instance = poly_mesh({camera: e.camera})
+	e.model.add(e.instance.group)
 
-	let helpers = new THREE.Group() // helper geometry for editor state
+	//let helpers = new THREE.Group() // helper geometry for editor state
 
-	let o = poly_mesh()
+	/*
+	let o = poly_mesh({name: 'testline'})
 	e.group.add(o.group)
 
-	let line = o.start_line(v3(0, 0, 0))
-	line.end = v3(1, 1, -1)
-	//o.snap_line_end(line)
-	o.add_line(line)
+	{
+		let line = o.start_line(v3(0, 0, 0))
+		line.end.copy(v3(1, 1, 0))
+		o.snap_line_end(line)
+		o.add_line(line)
+	}
+
+	{
+		let line = o.start_line(v3(.5, 1, 0))
+		line.end.copy(v3(.5, 0, 0))
+		o.snap_line_end(line)
+		o.add_line(line)
+	}
+	*/
 
 	print(e.scene)
 
 	// tools ---------------------------------------------------------------------
 
 	let tools = {}
+
+	tools.select = {}
+
 
 	tools.orbit = {}
 
@@ -886,10 +871,6 @@ component('x-modeleditor', function(e) {
 	}
 
 	tools.line = {}
-
-	tools.line.pointermove = function(e, ev, ht) {
-		//
-	}
 
 	{
 		let loader = new THREE.TextureLoader()
@@ -909,15 +890,45 @@ component('x-modeleditor', function(e) {
 		}
 	}
 
+	tools.line.bind = function(e, on) {
+		if (!on && e.line) {
+			e.instance.group.remove(e.line)
+			e.line = null
+			print('here')
+		}
+	}
+
+	tools.line.pointermove = function(e, ev, ht) {
+		let h = ht[0]
+		if (e.line) {
+			e.line.line.end.copy(h.point)
+			e.instance.snap_line_end(e.line.line)
+			e.line.update()
+		}
+	}
+
 	tools.line.pointerdown = function(e, ev, ht) {
 		let h = ht[0]
-		if (h && h.object == e.ground) {
-
-			e.scene.add(dot(h.point))
+		if (e.line) {
+			print(e.line)
+			e.instance.add_line(e.line.line)
+			e.line = null
+		} else if (h && h.object == e.ground) {
+			let line = e.instance.start_line(h.point)
+			e.line = line3d(line)
+			e.instance.group.add(e.line)
+			//e.scene.add(dot(h.point))
 		}
 		return e.capture_pointer_raycast(ev, function(e, ev, ht) {
 			print(ht.length)
 		})
+	}
+
+	tools.line.keydown = function(e, key) {
+		if (key == 'Escape') {
+			tools.line.bind(false)
+			return falase
+		}
 	}
 
 	tools.pull = {}
@@ -937,11 +948,12 @@ component('x-modeleditor', function(e) {
 
 	// current tool -----------------------------------------------------------
 
-	let tool
-	e.property('tool', () => tool, function(name) {
+	let tool, toolname
+	e.property('tool', () => toolname, function(name) {
 		if (tool && tool.bind)
 			tool.bind(e, false)
 		tool = assert(tools[name])
+		toolname = name
 		if (tool.bind)
 			tool.bind(e, true)
 		e.cursor = tool.cursor || name
@@ -992,9 +1004,17 @@ component('x-modeleditor', function(e) {
 	// key handling -----------------------------------------------------------
 
 	e.on('keydown', function(key) {
-		let tool = toolkeys[key]
-		if (tool)
-			e.tool = tool
+		if (tool.keydown)
+			if (tool.keydown(e, key) === false)
+				return false
+		let toolname = toolkeys[key.toLowerCase()]
+		if (toolname) {
+			e.tool = toolname
+			return false
+		} else if (key == ' ') {
+			e.tool = e.tool == 'select' ? 'orbit' : 'select'
+			return false
+		}
 	})
 
 })
