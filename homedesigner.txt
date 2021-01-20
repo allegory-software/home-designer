@@ -1,12 +1,16 @@
 
+TODO
+------------------------------------------------------------------------------
+- line-to-line intersection, clamped
+- overlapping lines cases
+
+
 Basic Modeling
 ------------------------------------------------------------------------------
 
 - line tool
 	- snap to axes
 	- snap to ref point
-	- line-line intersection
-	- overlapping lines cases
 	- polygon forming
 		- identify planes and make edge lists for each plane bounded by the new segments.
 		- make a rotation matrix for the plane (have a camera looking at the plane).
