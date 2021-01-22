@@ -148,8 +148,8 @@ function line_to_line_intersection(lp, lq, clamp, out_line) {
 
 	let p = lp.start
 	let q = lq.start
-	let mp = lp.delta()
-	let mq = lq.delta()
+	let mp = v3(); lp.delta(mp)
+	let mq = v3(); lq.delta(mq)
 	var qp = p.clone().sub(q)
 
 	var qp_mp = qp.dot(mp)
@@ -731,8 +731,47 @@ function ground() {
 	let e = new THREE.Mesh(geo, mat)
 	e.rotation.x = -PI / 2
 	e.receiveShadow = true
+	e.is_hit_plane = true
 	e.name = 'ground'
 	return e
+}
+
+{
+let hit_func = function(e, plane_normal) {
+	return function(raycaster) {
+		let ht = raycaster.intersectObject(e)
+		ht.angle = 1/0
+		if (ht.length) {
+			let h = ht[0]
+			let plane_dir = raycaster.ray.origin.clone().projectOnPlane(v3(0, 1, 0))
+			ht.angle = plane_dir.angleTo(plane_normal)
+			if (ht.angle > PI / 2)
+				ht.angle = abs(ht.angle - PI)
+		}
+		return ht
+	}
+}
+
+function xyplane() {
+	let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
+	let mat = new THREE.MeshLambertMaterial({depthTest: false, visible: false, side: THREE.DoubleSide})
+	let e = new THREE.Mesh(geo, mat)
+	e.is_hit_plane = true
+	e.name = 'xyplane'
+	e.hit = hit_func(e, v3(0, 0, 1))
+	return e
+}
+
+function zyplane() {
+	let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
+	let mat = new THREE.MeshLambertMaterial({depthTest: false, visible: false, side: THREE.DoubleSide})
+	let e = new THREE.Mesh(geo, mat)
+	e.rotation.y = -PI / 2
+	e.is_hit_plane = true
+	e.name = 'zyplane'
+	e.hit = hit_func(e, v3(1, 0, 0))
+	return e
+}
 }
 
 function hemlight() {
@@ -767,7 +806,7 @@ function line3d(line, color) {
 	let p1 = line.start
 	let p2 = line.end
 	let geo = new THREE.BufferGeometry().setFromPoints([p1, p2])
-	let mat = new THREE.LineBasicMaterial({color: color, polygonOffset: true})
+	let mat = new THREE.LineBasicMaterial({color: or(color, 0), polygonOffset: true})
 	let e = new THREE.Line(geo, mat)
 	e.line = line
 	e.update = function() {
@@ -805,12 +844,50 @@ function line3d(line, color) {
 	}
 }
 
+function vector3d() {
+	let e = new THREE.Group()
+	e.line = line3d(line3())
+	let geo = new THREE.ConeGeometry(.01, .04)
+	geo.translate(0, -.04 / 2, 0)
+	geo.rotateX(PI / 2)
+	let mat = new THREE.MeshPhongMaterial({color: 0x333333})
+	e.cone = new THREE.Mesh(geo, mat)
+	e.add(e.line)
+	e.add(e.cone)
+	e.origin = v3()
+	e.vector = v3()
+	e.update = function() {
+		let len = e.vector.length()
+		e.line.line.end.z = len
+		e.cone.position.z = len
+		e.line.update()
+		let p = e.position.clone()
+		e.position.copy(v3())
+		e.lookAt(e.vector)
+		e.position.copy(p)
+	}
+	return e
+}
+
+function v3d(id, vector, origin) {
+	let e = window[id]
+	if (!e) {
+		e = vector3d()
+		window[id] = e
+		scene.add(e)
+	}
+	if (vector)
+		e.vector.copy(vector)
+	if (origin)
+		e.position.copy(origin)
+	e.update()
+}
 
 // editor --------------------------------------------------------------------
 
 component('x-modeleditor', function(e) {
 
-	// camera, scene, renderer, ground, axes, cursor, model
+	// camera, scene, renderer, ground, xyplane, zyplane, axes, cursor, model
 
 	e.camera = new THREE.PerspectiveCamera(70, 1, MIND / 100, MAXD * 100)
 	e.camera.position.x =  .2
@@ -820,10 +897,12 @@ component('x-modeleditor', function(e) {
 	e.camera.rotation.y = -rad(30)
 
 	e.scene = new THREE.Scene()
+	window.scene = e.scene
 	e.scene.name = 'scene'
 	e.scene.add(skydome())
-	e.ground = ground()
-	e.scene.add(e.ground)
+	e.ground = ground(); e.scene.add(e.ground)
+	e.xyplane = xyplane(); e.scene.add(e.xyplane)
+	e.zyplane = zyplane(); e.scene.add(e.zyplane)
 	e.scene.add(...axes())
 	e.scene.add(hemlight())
 	e.scene.add(dirlight())
@@ -841,6 +920,15 @@ component('x-modeleditor', function(e) {
 	e.canvas.attr('tabindex', -1)
 	e.canvas.attr('style', 'position: absolute')
 	e.add(e.canvas)
+
+	e.overlay = tag('canvas', {
+		style: `
+			position: absolute;
+			left: 0; top: 0; right: 0; bottom: 0;
+			pointerevents: none;
+		`})
+	e.add(e.overlay)
+	e.cx = e.overlay.getContext('2d')
 
 	focusable_widget(e, e.canvas)
 
@@ -941,7 +1029,7 @@ component('x-modeleditor', function(e) {
 			e.instance.add_line(e.instance.line.line)
 			e.instance.line = null
 		}
-		if (h && h.object == e.ground) {
+		if (h && h.object.is_hit_plane) {
 			let p = e.instance.snap_line_start(h.point) || h.point
 			e.instance.line = line3d(line3(p, p.clone()), 0x000000)
 			e.instance.group.add(e.instance.line)
@@ -1002,9 +1090,25 @@ component('x-modeleditor', function(e) {
 		mouse.x = x
 		mouse.y = y
 		raycaster.setFromCamera(mouse, e.camera)
-		let ht = raycaster.intersectObjects(e.model.children)
-		if (!ht.length)
+		let ht = raycaster.intersectObject(e.model, true)
+		if (!ht.length) {
 			ht = raycaster.intersectObject(e.ground)
+			if (ht.length)
+				e.title = ht[0].object.name
+		}
+		if (!ht.length) {
+			let ht1 = e.xyplane.hit(raycaster)
+			let ht2 = e.zyplane.hit(raycaster)
+			print(ht1.angle, ht2.angle)
+			// choose whichever plane is facing the camera more straightly.
+			ht = ht1.angle < ht2.angle ? ht1 : ht2
+			e.title = ht[0].object.name
+		}
+		if (ht.length) {
+			let p = ht[0].point.clone()
+			let q = raycaster.ray.origin.clone()
+			v3d('dv', p.sub(q), q)
+		}
 		return ht
 	}
 
