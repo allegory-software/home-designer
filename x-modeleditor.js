@@ -449,13 +449,7 @@ function poly_mesh(e) {
 
 	// line drawing in 3 stages: snap_start, snap_end, add.
 
-	let snap_ds
-
-	e.update_snap_distance = function(camera) {
-		snap_ds = SNAPD ** 2
-	}
-
-	e.snap_line_start = function(line) {
+	e.snap_line_start = function(line, snap_ds) {
 
 		line.start.i = null
 		line.start.line_i = null
@@ -479,12 +473,12 @@ function poly_mesh(e) {
 
 	}
 
-	e.snap_line_end = function(line, ref_p) {
+	e.snap_line_end = function(line, ref_p, snap_ds, initial_snap) {
 
 		line.end.i = null
 		line.end.line_i = null
 		line.end.snap = false
-		line.snap = false
+		line.snap = initial_snap
 
 		// snap line end to existing points.
 		let int_p = e.point_hit_points(line.end, snap_ds)
@@ -514,16 +508,6 @@ function poly_mesh(e) {
 			line.point_i = int_line.end.i
 			line.snap = 'point_line'
 			return
-		}
-
-		// snap line to axes preserving length.
-		let xzplane_normal = v3(0, 1, 0)
-		let line_dir = line.delta(v3())
-		let line_len = line_dir.length()
-		print(line_dir.angleTo(xzplane_normal), PI / 16)
-		if (line_dir.angleTo(xzplane_normal) <= PI / 16) {
-			line.end.copy(xzplane_normal.setLength(line_len).add(line.start))
-			line.snap = 'xzplane'
 		}
 
 	}
@@ -777,40 +761,70 @@ function ground() {
 }
 
 {
-let hit_func = function(e, plane_normal) {
-	return function(raycaster) {
-		let ht = raycaster.intersectObject(e)
-		if (!ht.length)
+
+let ref_plane = function(name, normal, plane_hit_tooltip, snap_name, snap_axis, axis_snap_tooltip) {
+
+	let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
+	let mat = new THREE.MeshLambertMaterial({depthTest: false, visible: false, side: THREE.DoubleSide})
+	let e = new THREE.Mesh(geo, mat)
+	e.name = name
+
+	e.snap_hit = function(raycaster, line_start, snap_ds) {
+		let h = raycaster.intersectObject(e)[0]
+		if (!h)
 			return
-		let h = ht[0]
-		let plane_dir = raycaster.ray.origin.clone().projectOnPlane(v3(0, 1, 0))
-		h.angle = plane_dir.angleTo(plane_normal)
-		if (h.angle > PI / 2)
-			h.angle = abs(h.angle - PI)
+		let p1 = h.point.clone().sub(line_start)
+		let p21 = snap_axis.clone().setLength(p1.length())
+		let p22 = p21.clone().negate()
+		let ds1 = p1.distanceToSquared(p21)
+		let ds2 = p1.distanceToSquared(p22)
+		let p2 = ds1 < ds2 ? p21 : p22
+		h.ds = min(ds1, ds2)
+		if (h.ds > snap_ds)
+			return
+		h.point = p2.add(line_start)
+		h.snap = snap_name
+		h.tooltip = axis_snap_tooltip
 		return h
 	}
+
+	e.facing_hit = function(raycaster) {
+		let h = raycaster.intersectObject(e)[0]
+		if (!h)
+			return
+		let plane_dir = raycaster.ray.origin.clone().projectOnPlane(v3(0, 1, 0))
+		h.angle = plane_dir.angleTo(normal)
+		if (h.angle > PI / 2)
+			h.angle = abs(h.angle - PI)
+		h.tooltip = plane_hit_tooltip
+		return h
+	}
+
+	return e
 }
 
 function xyplane() {
-	let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
-	let mat = new THREE.MeshLambertMaterial({depthTest: false, visible: false, side: THREE.DoubleSide})
-	let e = new THREE.Mesh(geo, mat)
-	e.hit = hit_func(e, v3(0, 0, 1))
-	e.name = 'xyplane'
-	e.tooltip = 'on blue-red plane'
-	return e
+	return ref_plane(
+		'xyplane', v3(0, 0, 1), 'on the blue-red vertical plane',
+		'blue_axis', v3(0, 1, 0), 'on blue axis')
 }
 
 function zyplane() {
-	let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
-	let mat = new THREE.MeshLambertMaterial({depthTest: false, visible: false, side: THREE.DoubleSide})
-	let e = new THREE.Mesh(geo, mat)
+	let e = ref_plane(
+		'zyplane', v3(1, 0, 0), 'on the blue-green vertical plane',
+		'green_axis', v3(0, 0, 1), 'on green axis')
 	e.rotation.y = -PI / 2
-	e.hit = hit_func(e, v3(1, 0, 0))
-	e.name = 'zyplane'
-	e.tooltip = 'on blue-green plane'
 	return e
 }
+
+function xzplane() {
+	let e = ref_plane(
+		'xzplane', v3(0, 1, 0), 'on the horizontal plane',
+		'red_axis', v3(1, 0, 0), 'on red axis')
+	e.rotation.x = -PI / 2
+	return e
+}
+
 }
 
 function hemlight() {
@@ -912,7 +926,7 @@ function vector3d() {
 
 component('x-modeleditor', function(e) {
 
-	// camera, scene, renderer, ground, xyplane, zyplane, axes
+	// camera, scene, renderer, ground, xyplane, zyplane, xzplane axes
 
 	e.camera = new THREE.PerspectiveCamera(70, 1, MIND / 100, MAXD * 100)
 	e.camera.position.x =  .2
@@ -926,6 +940,7 @@ component('x-modeleditor', function(e) {
 	e.ground = ground(); e.scene.add(e.ground)
 	e.xyplane = xyplane(); e.scene.add(e.xyplane)
 	e.zyplane = zyplane(); e.scene.add(e.zyplane)
+	e.xzplane = xzplane(); e.scene.add(e.xzplane)
 	e.axes = axes()
 	e.scene.add(e.axes)
 	e.scene.add(hemlight())
@@ -1166,14 +1181,18 @@ component('x-modeleditor', function(e) {
 			e.cpoint.visible = false
 			e.cline.visible = false
 		} else {
-			e.cpoint.free()
-			e.cpoint = null
-			e.cline.free()
-			e.cline = null
+			tools.line.cancel()
+			e.cpoint = e.cpoint.free()
+			e.cline  = e.cline.free()
 		}
 	}
 
 	tools.line.cancel = function() {
+
+		e.xyplane.position.z = 0
+		e.zyplane.position.x = 0
+		e.xzplane.position.y = 0
+
 		e.tooltip = ''
 		e.cline.visible = false
 	}
@@ -1192,29 +1211,92 @@ component('x-modeleditor', function(e) {
 	}
 
 	let line_snap_colors = {
-		point_line: 0xff00ff,
+		point_line : 0xff00ff,
+		blue_axis  : 0x0000ff,
+		red_axis   : 0xff0000,
+		green_axis : 0x00ff00,
+	}
+
+	{
+		let hits = []
+		let cmp_hits = function(h1, h2) {
+			let ds1 = h1 ? h1.ds : 1/0
+			let ds2 = h2 ? h2.ds : 1/0
+			return ds1 == ds2 ? 0 : (ds1 < ds2 ? -1 : 1)
+		}
+		function closest_hit(h1, h2, h3) {
+			hits[0] = h1
+			hits[1] = h2
+			hits[2] = h3
+			hits.sort(cmp_hits)
+			return hits[0]
+		}
 	}
 
 	tools.line.pointermove = function(e) {
-		e.instance.update_snap_distance(e.camera)
-		e.cpoint.point.copy(e.hit.point)
+
+		let snap_ds = SNAPD ** 2
+
+		let hit
+
 		if (!e.cline.visible) {
+
+			// hit ground
+			hit = e.raycaster.intersectObject(e.ground)[0]
+
+			// hit ref planes
+			if (!hit)  {
+				let h1 = e.xyplane.facing_hit(e.raycaster)
+				let h2 = e.zyplane.facing_hit(e.raycaster)
+				// pick whichever plane is facing the camera more straightly.
+				hit = (h1 ? h1.angle : 1/0) < (h2 ? h2.angle : 1/0) ? h1 : h2
+			}
+
+			if (hit)
+				e.cpoint.point.copy(hit.point)
+
 			let p1 = e.cline.line.start
 			let p2 = e.cline.line.end
 			p1.copy(p2)
-			e.instance.snap_line_start(e.cline.line)
+			e.instance.snap_line_start(e.cline.line, snap_ds)
 			p2.copy(p1)
 			p2.i = p1.i
 			p2.snap = p1.snap
+
 		} else {
-			e.instance.snap_line_end(e.cline.line)
+
+			let p0 = e.cline.line.start
+
+			// move ref planes at line start point for snap-to-axis to work.
+			e.xyplane.position.z = p0.z
+			e.zyplane.position.x = p0.x
+			e.xzplane.position.y = p0.y
+
+			let h1 = e.xyplane.snap_hit(e.raycaster, p0, snap_ds)
+			let h2 = e.zyplane.snap_hit(e.raycaster, p0, snap_ds)
+			let h3 = e.xzplane.snap_hit(e.raycaster, p0, snap_ds)
+			hit = closest_hit(h1, h2, h3)
+			let axis_snap = hit && hit.snap
+
+			if (!hit)
+				hit = e.raycaster.intersectObject(e.ground)[0]
+
+			if (hit)
+				e.cpoint.point.copy(hit.point)
+
+			e.instance.snap_line_end(e.cline.line, null, snap_ds, axis_snap)
 		}
+
 		e.cpoint.visible = !!e.cpoint.point.snap
+
 		e.tooltip =
-			snap_tooltips[e.cpoint.point.snap || e.cline.line.snap]
-			|| (e.hit.object && e.hit.object.tooltip)
+			snap_tooltips[e.cpoint.point.snap
+			|| e.cline.line.snap]
+			|| (hit && hit.tooltip)
+
 		e.cpoint.color = point_snap_colors[e.cpoint.point.snap] || ''
 		e.cline.color = line_snap_colors[e.cline.line.snap] || 0x000000
+
 		e.cpoint.update()
 		e.cline.update()
 	}
@@ -1237,20 +1319,17 @@ component('x-modeleditor', function(e) {
 		}
 	}
 
+	// push/pull tool ---------------------------------------------------------
+
 	tools.pull = {}
 
 	tools.pull.pointerdown = function(e) {
 		//
 	}
 
-	tools.move = {}
+	// move tool --------------------------------------------------------------
 
-	let toolkeys = {
-		l: 'line',
-		p: 'pull',
-		o: 'orbit',
-		m: 'move',
-	}
+	tools.move = {}
 
 	// current tool -----------------------------------------------------------
 
@@ -1276,59 +1355,21 @@ component('x-modeleditor', function(e) {
 	// mouse handling ---------------------------------------------------------
 
 	e.mouse = v2()
-	e.hit = null
-
-	let raycaster = new THREE.Raycaster()
-
-	function update_mouse(mx, my) {
-		e.mouse.x = mx
-		e.mouse.y = my
-		e.hit = hittest(mx, my)
-	}
+	e.raycaster = new THREE.Raycaster()
 
 	{
 		let pm = v2()
-		function hittest(mx, my) {
-
+		function update_mouse(mx, my) {
+			e.mouse.x = mx
+			e.mouse.y = my
 			// calculate mouse position in normalized device coordinates.
 			pm.x =  (mx / e.canvas.width ) * 2 - 1
 			pm.y = -(my / e.canvas.height) * 2 + 1
-			raycaster.setFromCamera(pm, e.camera)
-
-			//let h = raycaster.intersectObject(e.model, true)[0]
-			//if (h)
-			//	return h
-
-			// hit ground
-			let h = raycaster.intersectObject(e.ground)[0]
-			if (h)
-				return h
-
-			// hit ref planes
-			{
-				let h1 = e.xyplane.hit(raycaster)
-				let h2 = e.zyplane.hit(raycaster)
-				// choose whichever plane is facing the camera more straightly.
-				let h = (h1 ? h1.angle : 1/0) < (h2 ? h2.angle : 1/0) ? h1 : h2
-				if (h)
-					return h
-			}
-
+			e.raycaster.setFromCamera(pm, e.camera)
 		}
 	}
 
 	e.on('pointermove', function(ev, mx, my) {
-
-		{
-		let x =  (mx / e.canvas.width ) * 2 - 1
-		let y = -(my / e.canvas.height) * 2 + 1
-		let v = v3(x, y, 0.5)
-		v.unproject(e.camera)
-		v.sub(e.camera.position)
-		v3d('vv', v)
-		}
-
-		v3d('ctltarget', e.controls.target)
 		update_mouse(mx, my)
 		if (tool.pointermove)
 			tool.pointermove(e)
@@ -1369,24 +1410,30 @@ component('x-modeleditor', function(e) {
 		v.setLength(factor)
 		if (delta < 0) {
 			e.camera.position.add(v)
-			//e.controls.target.add(v)
+			e.controls.target.add(v)
 			e.camera.updateProjectionMatrix()
 		} else {
 			e.camera.position.sub(v)
-			//e.controls.target.sub(v)
+			e.controls.target.sub(v)
 			e.camera.updateProjectionMatrix()
 		}
-		v3d('ctltarget', e.controls.target)
 		return false
 	})
 
 	// key handling -----------------------------------------------------------
 
+	let tool_keys = {
+		l: 'line',
+		p: 'pull',
+		o: 'orbit',
+		m: 'move',
+	}
+
 	e.on('keydown', function(key) {
 		if (tool.keydown)
 			if (tool.keydown(e, key) === false)
 				return false
-		let toolname = toolkeys[key.toLowerCase()]
+		let toolname = tool_keys[key.toLowerCase()]
 		if (toolname) {
 			e.tool = toolname
 			return false
