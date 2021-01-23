@@ -1,13 +1,16 @@
 
 TODO
 ------------------------------------------------------------------------------
-- overlapping lines cases
 - snap to axes
-- fixate free plane
-- tooltip that follows the mouse and hides on mouseleave
-- project/draw dots as divs, styled with css
-- wheel zooms in almost any tool towards raycasting ray
-- custom orbit tool
+	- translate ref planes to cline's start point
+	- don't snap on angle, snap on distance from end point to axis
+		- do the same for line-to-points snapping
+
+- fix wheel zoom to mouse position
+
+- fix pan with shift
+
+- overlapping lines cases
 
 
 Basic Modeling
