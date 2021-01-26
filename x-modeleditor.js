@@ -12,7 +12,8 @@
 let MIND    = 0.001         // min line distance
 let MAXD    = 1e4           // max model total distance
 let SNAPD   = 0.03          // max distance for snapping
-let MAXISD  = 0.00001       // max distance for intersections
+let TOUCHD  = 0.01          // max distance for selecting
+let MAXID   = 0.00001       // max distance for intersections
 
 // primitive construction ----------------------------------------------------
 
@@ -20,6 +21,81 @@ function v2(x, y)      { return new THREE.Vector2(x, y) }
 function v3(x, y, z)   { return new THREE.Vector3(x, y, z) }
 function line3(p1, p2) { return new THREE.Line3(p1, p2) }
 function color(c)      { return new THREE.Color(c) }
+
+function out_v3(p, out_p) { return out_p ? out_p.copy(p) : p.clone() }
+function out_line3(line, out_line) { return out_line ? out_line.copy(line) : line.clone() }
+
+// line-line intersection ----------------------------------------------------
+
+{
+	let mp = v3()
+	let mq = v3()
+	let qp = v3()
+	let rp = v3()
+	let rq = v3()
+	let p1 = v3()
+	let p2 = v3()
+	let line = line3(rp, rq)
+
+	// returns the smallest line that connects two (coplanar or skewed) lines.
+	// returns null for parallel lines.
+	function line_line_intersection(lp, lq, clamp, out_line) {
+
+		let p = lp.start
+		let q = lq.start
+		lp.delta(mp)
+		lq.delta(mq)
+		qp.copy(p).sub(q)
+
+		let qp_mp = qp.dot(mp)
+		let qp_mq = qp.dot(mq)
+		let mp_mp = mp.dot(mp)
+		let mq_mq = mq.dot(mq)
+		let mp_mq = mp.dot(mq)
+
+		let detp = qp_mp * mq_mq - qp_mq * mp_mq
+		let detq = qp_mp * mp_mq - qp_mq * mp_mp
+		let detm = mp_mq * mp_mq - mq_mq * mp_mp
+
+		if (detm == 0) // lines are parallel
+			return
+
+		rp.copy(p).add(mp.multiplyScalar(detp / detm))
+		rq.copy(q).add(mq.multiplyScalar(detq / detm))
+
+		if (clamp) {
+			p1.copy(lp.end).sub(lp.start)
+			p2.copy(rp).sub(lp.start)
+			let tp = p2.length() / p1.length() * (p1.dot(p2) > 0 ? 1 : -1)
+			p1.copy(lq.end).sub(lq.start)
+			p2.copy(rq).sub(lq.start)
+			let tq = p2.length() / p1.length() * (p1.dot(p2) > 0 ? 1 : -1)
+			if (tp < 0)
+				rp.copy(lp.start)
+			else if (tp > 1)
+				rp.copy(lp.end)
+			if (tq < 0)
+				rq.copy(lq.start)
+			else if (tq > 1)
+				rq.copy(lq.end)
+		}
+
+		return out_line3(line, out_line)
+	}
+}
+
+// find plane normal from 3 points -------------------------------------------
+
+{
+	let p = v3()
+	let q = v3()
+	function triangle_plane_normal(p1, p2, p3, out_p) {
+		p.subVectors(p2, p1)
+		q.subVectors(p3, p1)
+		p.cross(q).normalize()
+		return p.length() > .5 ? out_v3(p, out_p) : null
+	}
+}
 
 // region-finding algorithm --------------------------------------------------
 
@@ -139,87 +215,7 @@ function test_plane_regions() {
 	let rt = plane_regions(v3(0, 0, 1), get_point, lines)
 	for (let r of rt) { print(r.map(i => i+1)) }
 }
-test_plane_regions()
-
-// line-line-intersection ----------------------------------------------------
-
-// returns the smallest line that connects two lines, be they coplanar or skewed.
-function line_line_intersection(lp, lq, clamp, out_line) {
-
-	let p = lp.start
-	let q = lq.start
-	let mp = v3(); lp.delta(mp)
-	let mq = v3(); lq.delta(mq)
-	var qp = p.clone().sub(q)
-
-	var qp_mp = qp.dot(mp)
-	var qp_mq = qp.dot(mq)
-	var mp_mp = mp.dot(mp)
-	var mq_mq = mq.dot(mq)
-	var mp_mq = mp.dot(mq)
-
-	var detp = qp_mp * mq_mq - qp_mq * mp_mq
-	var detq = qp_mp * mp_mq - qp_mq * mp_mp
-	var detm = mp_mq * mp_mq - mq_mq * mp_mp
-
-	if (detm == 0) // lines are parallel
-		return
-
-	let rp = p.clone().add(mp.multiplyScalar(detp / detm))
-	let rq = q.clone().add(mq.multiplyScalar(detq / detm))
-	if (clamp) {
-		let p1 = v3()
-		let p2 = v3()
-		p1.copy(lp.end).sub(lp.start)
-		p2.copy(rp).sub(lp.start)
-		let tp = p2.length() / p1.length() * (p1.dot(p2) > 0 ? 1 : -1)
-		p1.copy(lq.end).sub(lq.start)
-		p2.copy(rq).sub(lq.start)
-		let tq = p2.length() / p1.length() * (p1.dot(p2) > 0 ? 1 : -1)
-		if (tp < 0)
-			rp.copy(lp.start)
-		else if (tp > 1)
-			rp.copy(lp.end)
-		if (tq < 0)
-			rq.copy(lq.start)
-		else if (tq > 1)
-			rq.copy(lq.end)
-	}
-
-	if (out_line) {
-		out_line.start.copy(rp)
-		out_line.end.copy(rq)
-	} else {
-		out_line = line3(rp, rq)
-	}
-
-	return out_line
-}
-
-print(line_line_intersection(line3(v3(0, 0, 0), v3(1, 0, 0)), line3(v3(0, 1, 0), v3(1, 1, 0))))
-
-/*
-	// alt. impl using cross vectors
-
-	let qp = v3().subVectors(p, q)
-	let pq = qp.clone().multiplyScalar(-1)
-
-	let npq = v3().crossVectors(mp, mq).normalize()
-	let nqp = v3().crossVectors(mq, mp).normalize()
-
-	let n1 = v3().crossVectors(mp, nqp).normalize()
-	let n2 = v3().crossVectors(mq, npq).normalize()
-
-	let qpDotn1 = qp.dot(n1)
-	let pqDotn2 = pq.dot(n2)
-
-	let mpDotn2 = mp.dot(n2)
-	let mqDotn1 = mq.dot(n1)
-
-	let p1 = p.clone().add(mp.clone().multiplyScalar(pqDotn2 / mpDotn2))
-	let p2 = q.clone().add(mq.clone().multiplyScalar(qpDotn1 / mqDotn1))
-
-*/
+// test_plane_regions()
 
 // editable polygon meshes ---------------------------------------------------
 
@@ -242,14 +238,6 @@ function material_db() {
 	}
 
 	return e
-}
-
-function triangle_plane_normal(p1, p2, p3) {
-	p2.sub(p1)
-	p3.sub(p1)
-	p2.cross(p3)
-	p2.normalize()
-	return p2.length() > .5 ? p2 : null
 }
 
 function poly_mesh(e) {
@@ -316,29 +304,6 @@ function poly_mesh(e) {
 				pis[i] = e.poly[pis[i]]
 			poly.triangle_pis	= pis
 		}
-	}
-
-	// hit-testing
-
-	// return the closest point to target point with the point index in p.i.
-	e.point_hit_points = function(target_p, max_ds, f) {
-		let min_ds = 1/0
-		let min_p
-		let p = v3()
-		for (let i = 0, len = e.points_len(); i < len; i++) {
-			let ds = e.get_point(i, p).distanceToSquared(target_p)
-			if (ds <= max_ds) {
-				if (f)
-					f(p, ds)
-				if (ds < min_ds) {
-					min_ds = ds
-					min_p = min_p || v3()
-					min_p.copy(p)
-					min_p.i = i
-				}
-			}
-		}
-		return min_p
 	}
 
 	// return the line from target line to its closest point
@@ -410,7 +375,7 @@ function poly_mesh(e) {
 
 	// return the line from target line to its closest line
 	// with the line index in line.end.line_i.
-	e.line_hit_lines = function(target_line, max_ds, f) {
+	e.line_hit_lines = function(target_line, max_ds, clamp, f) {
 		let min_ds = 1/0
 		let line = line3()
 		let int_line = line3()
@@ -428,7 +393,7 @@ function poly_mesh(e) {
 			} else if (touch1 && touch2) {
 				//
 			} else {
-				if (line_line_intersection(target_line, line, true, int_line)) {
+				if (line_line_intersection(target_line, line, clamp, int_line)) {
 					let ds = int_line.start.distanceToSquared(int_line.end)
 					if (ds <= max_ds) {
 						int_line.end.line_i = i
@@ -447,81 +412,16 @@ function poly_mesh(e) {
 		return min_int_line
 	}
 
-	// line drawing in 3 stages: snap_start, snap_end, add.
-
-	e.snap_line_start = function(line, snap_ds) {
-
-		line.start.i = null
-		line.start.line_i = null
-		line.start.snap = false
-
-		let int_p = e.point_hit_points(line.start, snap_ds)
-		if (int_p) {
-			line.start.copy(int_p)
-			line.start.i = int_p.i
-			line.start.snap = 'point'
-			return
-		}
-
-		let int_line = e.point_hit_lines(line.start, snap_ds)
-		if (int_line) {
-			line.start.copy(int_line.end)
-			line.start.line_i = int_line.end.line_i
-			line.start.snap = int_line.end.midpoint ? 'line_middle' : 'line'
-			return
-		}
-
-	}
-
-	e.snap_line_end = function(line, ref_p, snap_ds, initial_snap) {
-
-		line.end.i = null
-		line.end.line_i = null
-		line.end.snap = false
-		line.snap = initial_snap
-
-		// snap line end to existing points.
-		let int_p = e.point_hit_points(line.end, snap_ds)
-		if (int_p) {
-			line.end.copy(int_p)
-			line.end.i = int_p.i
-			line.end.snap = 'point'
-			return
-		}
-
-		// snap line end to existing lines.
-		let int_line = e.point_hit_lines(line.end, snap_ds)
-		if (int_line) {
-			line.end.copy(int_line.end)
-			line.end.line_i = int_line.end.line_i
-			line.end.snap = int_line.end.midpoint ? 'line_middle' : 'line'
-			return
-		}
-
-		// snap line to existing points preserving length.
-		int_line = e.line_hit_points(line, snap_ds)
-		if (int_line) {
-			let d = line.distance()
-			let d1 = line.start.distanceTo(int_line.end)
-			line.end.copy(int_line.end)
-			line.end.copy(line.at(d / d1, v3()))
-			line.point_i = int_line.end.i
-			line.snap = 'point_line'
-			return
-		}
-
-	}
-
 	e.add_line = function(line) {
 
-		let MAXISDS = MAXISD ** 2
+		let MAXIDS = MAXID ** 2
 
 		let p1 = line.start
 		let p2 = line.end
 
 		// check for min. line length for lines with new endpoints.
 		if (p1.i == null || p2.i == null) {
-			if (p1.distanceToSquared(p2) <= MAXISDS)
+			if (p1.distanceToSquared(p2) <= MAXIDS)
 				return
 		} else if (p1.i == p2.i) {
 			// check if end point was snapped to start end point.
@@ -532,7 +432,7 @@ function poly_mesh(e) {
 
 		// cut the line into segments at intersections with existing points.
 		line = line3(p1, p2)
-		e.line_hit_points(line, MAXISDS, function(int_line) {
+		e.line_hit_points(line, MAXIDS, function(int_line) {
 			let p = int_line.start
 			let i = p.i
 			if (i !== p1.i && i !== p2.i) { // exclude end points.
@@ -563,7 +463,7 @@ function poly_mesh(e) {
 		for (let i = 0; i < line_ps_len-1; i++) {
 			seg.start = line_ps[i]
 			seg.end   = line_ps[i+1]
-			e.line_hit_lines(seg, MAXISDS, function(int_line, line) {
+			e.line_hit_lines(seg, MAXIDS, true, function(int_line, line) {
 				let p = int_line.end
 				let line_i = p.line_i
 				p = p.clone()
@@ -645,6 +545,7 @@ function poly_mesh(e) {
 			geo.setIndex(e.line_pis)
 			mat = new THREE.LineBasicMaterial({color: 0x000000, polygonOffset: true})
 			let lines = new THREE.LineSegments(geo, mat)
+			lines.poly_mesh = e
 			e.group.add(lines)
 		}
 
@@ -654,6 +555,7 @@ function poly_mesh(e) {
 			geo.setAttribute('position', points)
 			let mat = new THREE.MeshPhongMaterial(0xffffff)
 			let mesh = new THREE.Mesh(geo, mat)
+			mesh.poly_mesh = e
 			e.group.add(mesh)
 		}
 
@@ -678,14 +580,14 @@ function poly_mesh(e) {
 // graphics elements ---------------------------------------------------------
 
 function axis(name, x, y, z, color, dashed) {
-	let material = dashed
+	let mat = dashed
 		? new THREE.LineDashedMaterial({color: color, scale: 100, dashSize: 1, gapSize: 1})
 		: new THREE.LineBasicMaterial({color: color})
-	let geometry = new THREE.BufferGeometry().setFromPoints([
+	let geo = new THREE.BufferGeometry().setFromPoints([
 		v3(  0,  0,  0),
 		v3(  x,  y,  z),
 	])
-	let line = new THREE.Line(geometry, material)
+	let line = new THREE.Line(geo, mat)
 	line.computeLineDistances()
 	line.name = name
 	return line
@@ -756,75 +658,7 @@ function ground() {
 	e.rotation.x = -PI / 2
 	e.receiveShadow = true
 	e.name = 'ground'
-	e.tooltip = 'on ground'
 	return e
-}
-
-{
-
-let ref_plane = function(name, normal, plane_hit_tooltip, snap_name, snap_axis, axis_snap_tooltip) {
-
-	let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
-	let mat = new THREE.MeshLambertMaterial({depthTest: false, visible: false, side: THREE.DoubleSide})
-	let e = new THREE.Mesh(geo, mat)
-	e.name = name
-
-	e.snap_hit = function(raycaster, line_start, snap_ds) {
-		let h = raycaster.intersectObject(e)[0]
-		if (!h)
-			return
-		let p1 = h.point.clone().sub(line_start)
-		let p21 = snap_axis.clone().setLength(p1.length())
-		let p22 = p21.clone().negate()
-		let ds1 = p1.distanceToSquared(p21)
-		let ds2 = p1.distanceToSquared(p22)
-		let p2 = ds1 < ds2 ? p21 : p22
-		h.ds = min(ds1, ds2)
-		if (h.ds > snap_ds)
-			return
-		h.point = p2.add(line_start)
-		h.snap = snap_name
-		h.tooltip = axis_snap_tooltip
-		return h
-	}
-
-	e.facing_hit = function(raycaster) {
-		let h = raycaster.intersectObject(e)[0]
-		if (!h)
-			return
-		let plane_dir = raycaster.ray.origin.clone().projectOnPlane(v3(0, 1, 0))
-		h.angle = plane_dir.angleTo(normal)
-		if (h.angle > PI / 2)
-			h.angle = abs(h.angle - PI)
-		h.tooltip = plane_hit_tooltip
-		return h
-	}
-
-	return e
-}
-
-function xyplane() {
-	return ref_plane(
-		'xyplane', v3(0, 0, 1), 'on the blue-red vertical plane',
-		'blue_axis', v3(0, 1, 0), 'on blue axis')
-}
-
-function zyplane() {
-	let e = ref_plane(
-		'zyplane', v3(1, 0, 0), 'on the blue-green vertical plane',
-		'green_axis', v3(0, 0, 1), 'on green axis')
-	e.rotation.y = -PI / 2
-	return e
-}
-
-function xzplane() {
-	let e = ref_plane(
-		'xzplane', v3(0, 1, 0), 'on the horizontal plane',
-		'red_axis', v3(1, 0, 0), 'on red axis')
-	e.rotation.x = -PI / 2
-	return e
-}
-
 }
 
 function hemlight() {
@@ -875,12 +709,15 @@ function dirlight() {
 	}
 }
 
-function line3d(line, color) {
+function line3d(line, color, dashed) {
 	line = line || line3()
 	color = color || 0
 	let geo = new THREE.BufferGeometry().setFromPoints([line.start, line.end])
-	let mat = new THREE.LineBasicMaterial({color: color, polygonOffset: true})
+	let mat = dashed
+		? new THREE.LineDashedMaterial({color: color, scale: 100, dashSize: 1, gapSize: 1, polygonOffset: true})
+		: new THREE.LineBasicMaterial({color: color, polygonOffset: true})
 	let e = new THREE.Line(geo, mat)
+	e.computeLineDistances()
 	e.line = line
 	e.update = function() {
 		let pb = geo.attributes.position
@@ -889,6 +726,7 @@ function line3d(line, color) {
 		pb.setXYZ(0, p1.x, p1.y, p1.z)
 		pb.setXYZ(1, p2.x, p2.y, p2.z)
 		pb.needsUpdate = true
+		e.computeLineDistances()
 	}
 	property(e, 'color', () => color, function(color1) {
 		color = color1
@@ -926,14 +764,18 @@ function vector3d() {
 
 component('x-modeleditor', function(e) {
 
-	// camera, scene, renderer, ground, xyplane, zyplane, xzplane axes
+	let pe = e
 
-	e.camera = new THREE.PerspectiveCamera(70, 1, MIND / 100, MAXD * 100)
+	// camera, scene, renderer, ground, axes
+
+	e.camera = new THREE.PerspectiveCamera(60, 1, MIND / 100, MAXD * 100)
 	e.camera.position.x =  .2
 	e.camera.position.y =  .5
 	e.camera.position.z =  1.5
 	e.camera.rotation.x = -rad(10)
 	e.camera.rotation.y = -rad(30)
+
+	let snap_d = SNAPD
 
 	e.scene = new THREE.Scene()
 	e.scene.add(skydome())
@@ -941,6 +783,7 @@ component('x-modeleditor', function(e) {
 	e.xyplane = xyplane(); e.scene.add(e.xyplane)
 	e.zyplane = zyplane(); e.scene.add(e.zyplane)
 	e.xzplane = xzplane(); e.scene.add(e.xzplane)
+	e.ref_planes = [e.xyplane, e.zyplane, e.xzplane]
 	e.axes = axes()
 	e.scene.add(e.axes)
 	e.scene.add(hemlight())
@@ -1036,7 +879,6 @@ component('x-modeleditor', function(e) {
 				tooltip.set(s)
 				tooltip.x = e.mouse.x
 				tooltip.y = e.mouse.y
-
 				timer = setTimeout(show_tooltip, 200)
 			}
 		})
@@ -1059,7 +901,6 @@ component('x-modeleditor', function(e) {
 		}
 
 		e.dot = function(point) {
-			let pe = this
 			let e = div()
 			e.point = point || v3()
 
@@ -1105,9 +946,8 @@ component('x-modeleditor', function(e) {
 
 	// helper lines -----------------------------------------------------------
 
-	e.line = function(line) {
-		let pe = this
-		let e = line3d(line)
+	e.line = function(...args) {
+		let e = line3d(...args)
 		e.free = function() {
 			pe.scene.remove(e)
 		}
@@ -1132,6 +972,130 @@ component('x-modeleditor', function(e) {
 		ve.update()
 	}
 
+	// reference planes -------------------------------------------------------
+
+	function ref_plane(
+			name, normal, plane_hit_tooltip,
+			main_axis_snap, main_axis, main_axis_snap_tooltip
+	) {
+		let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
+		let mat = new THREE.MeshLambertMaterial({depthTest: false, visible: false, side: THREE.DoubleSide})
+		let e = new THREE.Mesh(geo, mat)
+		e.name = name
+		e.main_axis_snap = main_axis_snap
+
+		e.hit_face = function() {
+			e.position.setScalar(0)
+			let h = pe.raycaster.intersectObject(e)[0]
+			if (!h)
+				return
+			let plane_dir = pe.raycaster.ray.origin.clone().projectOnPlane(v3(0, 1, 0))
+			h.angle = plane_dir.angleTo(normal)
+			if (h.angle > PI / 2)
+				h.angle = abs(h.angle - PI)
+			h.plane = e
+			h.tooltip = plane_hit_tooltip
+			return h
+		}
+
+		e.free_line_end_snap_to_main_axis = function(line_start) {
+			// move ref plane at line start point so we can raycast to it.
+			e.position.copy(line_start)
+			let h = pe.raycaster.intersectObject(e)[0]
+			if (!h)
+				return
+			let p1 = h.point.clone().sub(line_start)
+			let p21 = main_axis.clone().setLength(p1.length())
+			let p22 = p21.clone().negate()
+			let ds1 = p1.distanceToSquared(p21)
+			let ds2 = p1.distanceToSquared(p22)
+			let p2 = ds1 < ds2 ? p21 : p22
+			h.ds = min(ds1, ds2)
+			if (h.ds > snap_d ** 2)
+				return
+			h.point = p2.add(line_start)
+			h.snap = main_axis_snap
+			h.tooltip = main_axis_snap_tooltip
+			return h
+		}
+
+		// intersect the plane's main axis from an origin with a line
+		// and return the projected point on the line.
+		let int_line = line3()
+		let main_axis_line = line3()
+		e.main_axis_hit_line = function(line, axis_origin, out_p) {
+			main_axis_line.start.copy(axis_origin)
+			main_axis_line.end.addVectors(axis_origin, main_axis)
+			if (!line_line_intersection(main_axis_line, line, false, int_line))
+				return
+			let ds = int_line.start.distanceToSquared(int_line.end)
+			if (ds > MAXID ** 2)
+				return
+			return out_v3(int_line.end, out_p)
+		}
+
+		return e
+	}
+
+	function xyplane() {
+		return ref_plane(
+			'xyplane', v3(0, 0, 1), 'on the blue-red vertical plane',
+			'blue_axis', v3(0, 1, 0), 'on blue axis')
+	}
+
+	function zyplane() {
+		let e = ref_plane(
+			'zyplane', v3(1, 0, 0), 'on the blue-green vertical plane',
+			'green_axis', v3(0, 0, 1), 'on green axis')
+		e.rotation.y = -PI / 2
+		return e
+	}
+
+	function xzplane() {
+		let e = ref_plane(
+			'xzplane', v3(0, 1, 0), 'on the horizontal plane',
+			'red_axis', v3(1, 0, 0), 'on red axis')
+		e.rotation.x = -PI / 2
+		return e
+	}
+
+	{
+		let hits = []
+		let cmp_hits = function(h1, h2) {
+			let ds1 = h1 ? h1.ds : 1/0
+			let ds2 = h2 ? h2.ds : 1/0
+			return ds1 == ds2 ? 0 : (ds1 < ds2 ? -1 : 1)
+		}
+		function free_line_end_snap_to_axes(line_start) {
+			let i = 0
+			for (let plane of e.ref_planes)
+				hits[i++] = plane.free_line_end_snap_to_main_axis(line_start)
+			hits.sort(cmp_hits)
+			return hits[0]
+		}
+
+	}
+
+	{
+		let int_p = v3()
+		let ret = {point: v3()}
+		function point_on_line_snap_to_axes(line, p, line_start) {
+			ret.distance = 1/0
+			ret.plane = null
+			for (let plane of e.ref_planes) {
+				if (plane.main_axis_hit_line(line, line_start, int_p)) {
+					let d = p.distanceTo(int_p)
+					if (d <= snap_d && d <= ret.distance) {
+						ret.distance = d
+						ret.point.copy(int_p)
+						ret.plane = plane
+					}
+				}
+			}
+			return ret.plane ? ret : null
+		}
+	}
+
 	// model ------------------------------------------------------------------
 
 	e.components = {} // {name->group}
@@ -1151,6 +1115,35 @@ component('x-modeleditor', function(e) {
 
 	tools.select = {}
 
+	tools.select.pointerdown = function(e) {
+
+		let h = e.raycaster.intersectObject(e.model, true)[0]
+		if (!h)
+			return
+
+		//if (h.object.type == 'LineSegments')
+
+
+
+		/*
+		let touch_ds = TOUCHD ** 2
+
+		let ray = line3(
+			e.raycaster.ray.origin,
+			e.raycaster.ray.direction)
+
+		let int_line = e.line_hit_lines(ray, touch_ds, false)
+		if (int_line) {
+
+			= int_line.end.line_i
+
+			e.selected_line =
+
+		}
+		*/
+
+	}
+
 	// orbit tool -------------------------------------------------------------
 
 	tools.orbit = {}
@@ -1168,6 +1161,62 @@ component('x-modeleditor', function(e) {
 		e.controls.update()
 	}
 
+	// current point hit-testing and snapping ---------------------------------
+
+	function cpoint_hit_test_and_snap() {
+
+		// hit model
+		let hit = e.raycaster.intersectObject(e.model, true)[0]
+		if (!hit)
+			return
+
+		if (hit.object.type == 'LineSegments') {
+
+			let p = hit.point
+			p.line_i = hit.index / 2
+			p.snap = 'line'
+
+			let indices = hit.object.geometry.index.array
+			let i1 = indices[hit.index+0]
+			let i2 = indices[hit.index+1]
+			let pos = hit.object.geometry.attributes.position.array
+			let p1x = pos[i1*3+0]
+			let p1y = pos[i1*3+1]
+			let p1z = pos[i1*3+2]
+			let p2x = pos[i2*3+0]
+			let p2y = pos[i2*3+1]
+			let p2z = pos[i2*3+2]
+			let p1 = v3(p1x, p1y, p1z)
+			let p2 = v3(p2x, p2y, p2z)
+			let line = line3(p1, p2)
+
+			let line_d = line.distance()
+			let cut1_d = p1.distanceTo(p)
+
+			if (abs(cut1_d) <= snap_d) {
+				p.copy(p1)
+				p.i = i1
+				p.snap = 'point'
+			} else if (abs(line_d - cut1_d) <= snap_d) {
+				p.copy(p2)
+				p.i = i2
+				p.snap = 'point'
+			} else if (abs(line_d / 2 - cut1_d) <= snap_d) {
+				line.at(.5, p)
+				p.snap = 'line_middle'
+			} else {
+				let hit = point_on_line_snap_to_axes(line, p, e.cline.line.start)
+				if (hit) {
+					p.copy(hit.point)
+					e.cline.line.snap = hit.plane.main_axis_snap
+				}
+			}
+
+			return hit
+		}
+
+	}
+
 	// line tool --------------------------------------------------------------
 
 	tools.line = {}
@@ -1180,21 +1229,20 @@ component('x-modeleditor', function(e) {
 			e.cline.color = 0x000000
 			e.cpoint.visible = false
 			e.cline.visible = false
+			e.ref_point = e.dot()
+			e.ref_point.visible = false
 		} else {
 			tools.line.cancel()
 			e.cpoint = e.cpoint.free()
 			e.cline  = e.cline.free()
+			e.ref_point = e.ref_point.free()
 		}
 	}
 
 	tools.line.cancel = function() {
-
-		e.xyplane.position.z = 0
-		e.zyplane.position.x = 0
-		e.xzplane.position.y = 0
-
 		e.tooltip = ''
 		e.cline.visible = false
+		e.ref_point.visible = false
 	}
 
 	let snap_tooltips = {
@@ -1217,74 +1265,76 @@ component('x-modeleditor', function(e) {
 		green_axis : 0x00ff00,
 	}
 
-	{
-		let hits = []
-		let cmp_hits = function(h1, h2) {
-			let ds1 = h1 ? h1.ds : 1/0
-			let ds2 = h2 ? h2.ds : 1/0
-			return ds1 == ds2 ? 0 : (ds1 < ds2 ? -1 : 1)
-		}
-		function closest_hit(h1, h2, h3) {
-			hits[0] = h1
-			hits[1] = h2
-			hits[2] = h3
-			hits.sort(cmp_hits)
-			return hits[0]
-		}
-	}
-
 	tools.line.pointermove = function(e) {
 
-		let snap_ds = SNAPD ** 2
+		let cline = e.cline.line
+		let p1 = cline.start
+		let p2 = cline.end
+		p2.i = null
+		p2.line_i = null
+		p2.snap = false
+		cline.snap = null
 
-		let hit
+		let hit = cpoint_hit_test_and_snap()
 
 		if (!e.cline.visible) {
 
 			// hit ground
-			hit = e.raycaster.intersectObject(e.ground)[0]
+			if (!hit)
+				hit = e.xzplane.hit_face()
 
-			// hit ref planes
+			// hit vertical ref planes
 			if (!hit)  {
-				let h1 = e.xyplane.facing_hit(e.raycaster)
-				let h2 = e.zyplane.facing_hit(e.raycaster)
+				let h1 = e.xyplane.hit_face()
+				let h2 = e.zyplane.hit_face()
 				// pick whichever plane is facing the camera more straightly.
 				hit = (h1 ? h1.angle : 1/0) < (h2 ? h2.angle : 1/0) ? h1 : h2
 			}
 
-			if (hit)
-				e.cpoint.point.copy(hit.point)
+			if (hit) {
+				let sp = hit.point
+				update(p1, sp)
+				update(p2, sp)
+			}
 
-			let p1 = e.cline.line.start
-			let p2 = e.cline.line.end
-			p1.copy(p2)
-			e.instance.snap_line_start(e.cline.line, snap_ds)
-			p2.copy(p1)
-			p2.i = p1.i
-			p2.snap = p1.snap
+			e.start_plane = hit && hit.plane
 
 		} else {
 
-			let p0 = e.cline.line.start
+			if (hit && hit.point.i != null && hit.point.i != cline.start.i) {
+				e.ref_point.point.copy(hit.point)
+				e.ref_point.update()
+				e.ref_point.visible = true
+			}
 
-			// move ref planes at line start point for snap-to-axis to work.
-			e.xyplane.position.z = p0.z
-			e.zyplane.position.x = p0.x
-			e.xzplane.position.y = p0.y
+			if (!hit) {
+				hit = free_line_end_snap_to_axes(p1)
+				if (hit)
+					cline.snap = hit.snap
+			}
 
-			let h1 = e.xyplane.snap_hit(e.raycaster, p0, snap_ds)
-			let h2 = e.zyplane.snap_hit(e.raycaster, p0, snap_ds)
-			let h3 = e.xzplane.snap_hit(e.raycaster, p0, snap_ds)
-			hit = closest_hit(h1, h2, h3)
-			let axis_snap = hit && hit.snap
+			if (!hit && e.start_plane)
+				hit = e.start_plane.hit_face()
 
-			if (!hit)
-				hit = e.raycaster.intersectObject(e.ground)[0]
+			if (e.ref_point && hit) {
+				update(p2, hit.point)
+				let hit1 = point_on_line_snap_to_axes(cline, hit.point, e.ref_point.point)
+				if (hit1) {
+					e.ref_line = e.ref_line || e.line(null, null, true)
+					e.ref_line.line.start.copy(e.ref_point.point)
+					e.ref_line.line.end.copy(hit1.point)
+					e.ref_line.update()
+					e.ref_line.visible = true
+					hit = hit1
+				} else if (e.ref_line)
+					e.ref_line.visible = false
+			}
 
-			if (hit)
-				e.cpoint.point.copy(hit.point)
+			if (hit) {
+				let sp = hit.point
+				update(p2, sp)
+			}
 
-			e.instance.snap_line_end(e.cline.line, null, snap_ds, axis_snap)
 		}
 
 		e.cpoint.visible = !!e.cpoint.point.snap
@@ -1304,9 +1354,15 @@ component('x-modeleditor', function(e) {
 	tools.line.pointerdown = function(e) {
 		e.tooltip = ''
 		if (e.cline.visible) {
-			e.instance.add_line(e.cline.line)
-			e.cline.line.start.copy(e.cline.line.end)
-			e.cline.line.start.i = e.cline.line.end.i
+			let cline = e.cline.line
+			let closing = cline.end.i != null || cline.end.line_i != null
+			e.instance.add_line(cline)
+			if (closing) {
+				tools.line.cancel()
+			} else {
+				cline.start.copy(cline.end)
+				cline.start.i = cline.end.i
+			}
 		} else {
 			e.cline.visible = true
 		}
@@ -1317,6 +1373,14 @@ component('x-modeleditor', function(e) {
 			tools.line.cancel()
 			return false
 		}
+	}
+
+	// rectangle tool ---------------------------------------------------------
+
+	tools.rect = {}
+
+	tools.rect.pointerdown = function(e) {
+
 	}
 
 	// push/pull tool ---------------------------------------------------------
@@ -1356,6 +1420,7 @@ component('x-modeleditor', function(e) {
 
 	e.mouse = v2()
 	e.raycaster = new THREE.Raycaster()
+	e.raycaster.params.Line.threshold = TOUCHD
 
 	{
 		let pm = v2()
@@ -1424,12 +1489,15 @@ component('x-modeleditor', function(e) {
 
 	let tool_keys = {
 		l: 'line',
+		r: 'rect',
 		p: 'pull',
 		o: 'orbit',
 		m: 'move',
 	}
 
-	e.on('keydown', function(key) {
+	e.on('keydown', function(key, shift, ctrl) {
+		if (shift || ctrl)
+			return
 		if (tool.keydown)
 			if (tool.keydown(e, key) === false)
 				return false

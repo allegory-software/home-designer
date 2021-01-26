@@ -1,16 +1,15 @@
 
 TODO
 ------------------------------------------------------------------------------
-- snap to axes
-	- translate ref planes to cline's start point
-	- don't snap on angle, snap on distance from end point to axis
-		- do the same for line-to-points snapping
-
-- fix wheel zoom to mouse position
-
-- fix pan with shift
-
+- do the same for line-to-points snapping
 - overlapping lines cases
+
+
+LATERZ
+------------------------------------------------------------------------------
+- fix pan with shift
+- fix dashed lines
+-
 
 
 Basic Modeling
