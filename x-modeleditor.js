@@ -552,7 +552,6 @@ function poly_mesh(e) {
 			e.group.add(mesh)
 		}
 
-
 		{
 			let coords = []
 			for (let i = 0, len = e.points_len(), p = v3(); i < len; i++) {
@@ -674,18 +673,16 @@ function hemlight() {
 	let e = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6)
 	e.color.setHSL(0.6, 1, 0.6)
 	e.groundColor.setHSL(0.095, 1, 0.75)
-	e.position.set(0, 50, 0)
-	e.castShadow = false
+	e.position.set(0, 0, 0)
 	return e
 }
 
 function dirlight() {
 	let e = new THREE.DirectionalLight(0xffffff, 1)
 	e.color.setHSL(0.1, 1, 0.95)
-	e.position.set( -1, 1.75, 1)
-	e.position.multiplyScalar(30)
-	e.castShadow = false
+	e.position.set( 100, 100, 100)
 	/*
+	e.castShadow = true
 	e.shadow.mapSize.width = 2048
 	e.shadow.mapSize.height = 2048
 	let d = 50
@@ -693,8 +690,8 @@ function dirlight() {
 	e.shadow.camera.right = d
 	e.shadow.camera.top = d
 	e.shadow.camera.bottom = - d
-	e.shadow.camera.far = 3500;
-	e.shadow.bias = - 0.0001;
+	e.shadow.camera.far = 3500
+	e.shadow.bias = - 0.0001
 	*/
 	return e
 }
@@ -766,28 +763,11 @@ component('x-modeleditor', function(e) {
 
 	let pe = e
 
-	// camera, scene, renderer, ground, axes
-
-	e.camera = new THREE.PerspectiveCamera(60, 1, MIND * 100, MAXD * 100)
-	e.camera.position.x =  .2
-	e.camera.position.y =  .5
-	e.camera.position.z =  4
-	e.camera.rotation.x = -rad(10)
-	e.camera.rotation.y = -rad(30)
+	// scene, renderer, camera, ground, axes
 
 	let snap_d = SNAPD
 
 	e.scene = new THREE.Scene()
-	e.scene.add(skydome())
-	e.ground = ground(); e.scene.add(e.ground)
-	e.xyplane = xyplane(); e.scene.add(e.xyplane)
-	e.zyplane = zyplane(); e.scene.add(e.zyplane)
-	e.xzplane = xzplane(); e.scene.add(e.xzplane)
-	e.ref_planes = [e.xyplane, e.zyplane, e.xzplane]
-	e.axes = axes()
-	e.scene.add(e.axes)
-	e.scene.add(hemlight())
-	e.scene.add(dirlight())
 
 	e.renderer = new THREE.WebGLRenderer({antialias: true})
 	e.renderer.setPixelRatio(window.devicePixelRatio)
@@ -803,16 +783,26 @@ component('x-modeleditor', function(e) {
 	e.canvas.attr('style', 'position: absolute')
 	e.add(e.canvas)
 
-	/*
-	e.overlay = tag('canvas', {
-		style: `
-			position: absolute;
-			left: 0; top: 0; right: 0; bottom: 0;
-			pointer-events: none;
-		`})
-	e.add(e.overlay)
-	e.cx = e.overlay.getContext('2d')
-	*/
+	e.camera = new THREE.PerspectiveCamera(60, 1, MIND * 100, MAXD * 100)
+	e.camera.position.x =  .2
+	e.camera.position.y =  .5
+	e.camera.position.z =  4
+	e.camera.rotation.x = -rad(10)
+	e.camera.rotation.y = -rad(30)
+	e.scene.add(e.camera)
+
+	e.scene.add(hemlight())
+	e.dirlight = dirlight()
+	e.camera.add(e.dirlight)
+
+	e.scene.add(skydome())
+	//e.ground = ground(); e.scene.add(e.ground)
+	e.xyplane = xyplane(); e.scene.add(e.xyplane)
+	e.zyplane = zyplane(); e.scene.add(e.zyplane)
+	e.xzplane = xzplane(); e.scene.add(e.xzplane)
+	e.ref_planes = [e.xyplane, e.zyplane, e.xzplane]
+	e.axes = axes()
+	e.scene.add(e.axes)
 
 	focusable_widget(e, e.canvas)
 
@@ -1152,10 +1142,10 @@ component('x-modeleditor', function(e) {
 	]
 
 	e.instance.polys = [
-		[0, 1, 2, 3],
+		[1, 0, 3, 2],
 		[4, 5, 6, 7],
 		[7, 6, 2, 3],
-		[4, 5, 1, 0],
+		[1, 0, 4, 5],
 		[0, 4, 7, 3],
 		[5, 1, 2, 6],
 	]
