@@ -549,6 +549,7 @@ function poly_mesh(e) {
 			let mat = new THREE.MeshPhongMaterial({color: 0xffffff, side: THREE.DoubleSide})
 			let mesh = new THREE.Mesh(geo, mat)
 			mesh.poly_mesh = e
+			mesh.castShadow = true
 			e.group.add(mesh)
 		}
 
@@ -574,7 +575,7 @@ function poly_mesh(e) {
 			let geo = new THREE.BufferGeometry()
 			geo.setAttribute('position', points)
 			geo.setIndex(e.line_pis)
-			mat = new THREE.LineBasicMaterial({color: 0x000000, polygonOffset: true})
+			let mat = new THREE.LineBasicMaterial({color: 0x000000, polygonOffset: true})
 			let lines = new THREE.LineSegments(geo, mat)
 			lines.poly_mesh = e
 			e.group.add(lines)
@@ -587,116 +588,7 @@ function poly_mesh(e) {
 
 // graphics elements ---------------------------------------------------------
 
-function axis(name, x, y, z, color, dashed) {
-	let mat = dashed
-		? new THREE.LineDashedMaterial({color: color, scale: 100, dashSize: 1, gapSize: 1})
-		: new THREE.LineBasicMaterial({color: color})
-	let geo = new THREE.BufferGeometry().setFromPoints([
-		v3(  0,  0,  0),
-		v3(  x,  y,  z),
-	])
-	let line = new THREE.Line(geo, mat)
-	line.computeLineDistances()
-	line.name = name
-	return line
-}
-
-function axes() {
-	let M = MAXD
-	let e = new THREE.Group()
-	e.add(
-		axis('+z_axis',  0,  0, -M, 0x00ff00),
-		axis('+x_axis',  M,  0,  0, 0xff0000),
-		axis('+y_axis',  0,  M,  0, 0x0000ff),
-		axis('-z_axis',  0,  0,  M, 0x00ff00, true),
-		axis('-x_axis', -M,  0,  0, 0xff0000, true),
-		axis('-y_axis',  0, -M,  0, 0x0000ff, true),
-	)
-	return e
-}
-
-function skydome() {
-
-	let vshader = `
-		varying vec3 vWorldPosition;
-		void main() {
-			vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-			vWorldPosition = worldPosition.xyz;
-			gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-		}
-
-	`
-
-	let fshader = `
-		uniform vec3 topColor;
-		uniform vec3 bottomColor;
-		uniform float offset;
-		uniform float exponent;
-		varying vec3 vWorldPosition;
-		void main() {
-			float h = normalize(vWorldPosition + offset).y;
-			gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
-		}
-	`
-
-	let uniforms = {
-		topColor     : {value: color(0x9999cc)},
-		bottomColor  : {value: color(0xffffff)},
-		offset       : {value: 33},
-		exponent     : {value: .6},
-	}
-
-	let geo = new THREE.BoxBufferGeometry(2*MAXD, 2*MAXD, 2*MAXD)
-	let mat = new THREE.ShaderMaterial({
-		uniforms       : uniforms,
-		vertexShader   : vshader,
-		fragmentShader : fshader,
-		side: THREE.BackSide,
-	})
-	let e = new THREE.Mesh(geo, mat)
-	e.name = 'skydome'
-	return e
-}
-
-function ground() {
-	let geo = new THREE.PlaneBufferGeometry(2*MAXD, 2*MAXD)
-	let mat = new THREE.MeshLambertMaterial({color: 0xffffff, depthTest: false})
-	mat.color.setHSL(0.09, .6, 0.75)
-	let e = new THREE.Mesh(geo, mat)
-	e.rotation.x = -PI / 2
-	e.receiveShadow = true
-	e.name = 'ground'
-	return e
-}
-
-function hemlight() {
-	let e = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6)
-	e.color.setHSL(0.6, 1, 0.6)
-	e.groundColor.setHSL(0.095, 1, 0.75)
-	e.position.set(0, 0, 0)
-	return e
-}
-
-function dirlight() {
-	let e = new THREE.DirectionalLight(0xffffff, 1)
-	e.color.setHSL(0.1, 1, 0.95)
-	e.position.set( 100, 100, 100)
-	/*
-	e.castShadow = true
-	e.shadow.mapSize.width = 2048
-	e.shadow.mapSize.height = 2048
-	let d = 50
-	e.shadow.camera.left = - d
-	e.shadow.camera.right = d
-	e.shadow.camera.top = d
-	e.shadow.camera.bottom = - d
-	e.shadow.camera.far = 3500
-	e.shadow.bias = - 0.0001
-	*/
-	return e
-}
-
-function line3d(line, color, dashed) {
+function line3d(line, color, dashed, name) {
 	line = line || line3()
 	color = color || 0
 	let geo = new THREE.BufferGeometry().setFromPoints([line.start, line.end])
@@ -706,6 +598,7 @@ function line3d(line, color, dashed) {
 	let e = new THREE.Line(geo, mat)
 	e.computeLineDistances()
 	e.line = line
+	e.name = name
 
 	e.update = function() {
 		let pb = geo.attributes.position
@@ -757,19 +650,98 @@ function vector3d() {
 	return e
 }
 
+function skydome() {
+
+	let vshader = `
+		varying vec3 vWorldPosition;
+		void main() {
+			vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+			vWorldPosition = worldPosition.xyz;
+			gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+		}
+
+	`
+
+	let fshader = `
+		uniform vec3 sky_color;
+		uniform vec3 horizon_color;
+		uniform vec3 ground_color;
+		uniform float offset;
+		uniform float exponent;
+		varying vec3 vWorldPosition;
+		void main() {
+			float h = normalize(vWorldPosition).y;
+			gl_FragColor = vec4(
+				mix(
+					mix(horizon_color, sky_color, pow(max(h, 0.0), exponent)),
+					ground_color,
+					1.0-step(0.0, h)
+			), 1.0);
+		}
+	`
+
+	let uniforms = {
+		sky_color     : {value: color(0xccddff)},
+		horizon_color : {value: color(0xffffff)},
+		ground_color  : {value: color(0xe0dddd)},
+		exponent      : {value: .5},
+	}
+
+	let geo = new THREE.BoxBufferGeometry(2*MAXD, 2*MAXD, 2*MAXD)
+	let mat = new THREE.ShaderMaterial({
+		uniforms       : uniforms,
+		vertexShader   : vshader,
+		fragmentShader : fshader,
+		side: THREE.BackSide,
+	})
+	let e = new THREE.Mesh(geo, mat)
+	e.name = 'skydome'
+	return e
+}
+
+function hemlight() {
+	let e = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6)
+	e.color.setHSL(0.6, 1, 0.6)
+	e.groundColor.setHSL(0.095, 1, 0.75)
+	e.position.set(0, 0, 0)
+	return e
+}
+
+function dirlight() {
+	let e = new THREE.DirectionalLight(0xffffff, 1)
+	//e.layers.set(2)
+
+	/*
+	e.castShadow = true
+	e.shadow.mapSize.width = 2048
+	e.shadow.mapSize.height = 2048
+	let d = 50
+	e.shadow.camera.left = - d
+	e.shadow.camera.right = d
+	e.shadow.camera.top = d
+	e.shadow.camera.bottom = - d
+	e.shadow.camera.far = 3500
+	e.shadow.bias = - 0.0001
+	*/
+
+	return e
+}
+
 // editor --------------------------------------------------------------------
 
 component('x-modeleditor', function(e) {
 
 	let pe = e
 
-	// scene, renderer, camera, ground, axes
+	// scene, renderer, camera, axes
 
 	let snap_d = SNAPD
 
 	e.scene = new THREE.Scene()
 
-	e.renderer = new THREE.WebGLRenderer({antialias: true})
+	e.canvas = tag('canvas')
+	e.context = assert(e.canvas.getContext('webgl2'))
+	e.renderer = new THREE.WebGLRenderer({canvas: e.canvas, context: e.context, antialias: true})
 	e.renderer.setPixelRatio(window.devicePixelRatio)
 	e.renderer.outputEncoding = THREE.sRGBEncoding
 	e.renderer.shadowMap.enabled = true
@@ -778,25 +750,24 @@ component('x-modeleditor', function(e) {
 		e.renderer.render(e.scene, e.camera)
 	})
 
-	e.canvas = e.renderer.domElement
 	e.canvas.attr('tabindex', -1)
 	e.canvas.attr('style', 'position: absolute')
 	e.add(e.canvas)
 
 	e.camera = new THREE.PerspectiveCamera(60, 1, MIND * 100, MAXD * 100)
-	e.camera.position.x =  .2
-	e.camera.position.y =  .5
-	e.camera.position.z =  4
+	e.camera.layers.enable(1)
+	e.camera.position.x =  3
+	e.camera.position.y =  5
+	e.camera.position.z =  6
 	e.camera.rotation.x = -rad(10)
 	e.camera.rotation.y = -rad(30)
 	e.scene.add(e.camera)
 
 	e.scene.add(hemlight())
 	e.dirlight = dirlight()
-	e.camera.add(e.dirlight)
+	e.scene.add(e.dirlight)
 
 	e.scene.add(skydome())
-	//e.ground = ground(); e.scene.add(e.ground)
 	e.xyplane = xyplane(); e.scene.add(e.xyplane)
 	e.zyplane = zyplane(); e.scene.add(e.zyplane)
 	e.xzplane = xzplane(); e.scene.add(e.xzplane)
@@ -811,12 +782,99 @@ component('x-modeleditor', function(e) {
 		e.camera.aspect = r.w / r.h
 		e.camera.updateProjectionMatrix()
 		e.renderer.setSize(r.w, r.h)
+		e.axes.update()
 	}
 	e.on('resize', resized)
 
 	e.on('bind', function(on) {
 		//if (on) resized(e.rect())
 	})
+
+	// axes -------------------------------------------------------------------
+
+	function axis(name, p, axis_color, dashed) {
+
+		if (dashed) {
+
+			let vshader = `
+				flat out vec4 p0;
+				out vec4 p;
+				void main() {
+					vec4 p1 = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+					gl_Position = p1;
+					p  = p1;
+					p0 = p1;
+				}
+			`
+
+			let fshader = `
+				precision highp float;
+				flat in vec4 p0;
+				in vec4 p;
+				uniform vec3  color;
+				uniform vec2  canvas;
+				uniform float dash;
+				uniform float gap;
+				void main(){
+					vec2 dir = ((p.xyz / p.w).xy - (p0.xyz / p0.w).xy) * canvas.xy / 2.0;
+					float dist = length(dir);
+					if (fract(dist / (dash + gap)) > dash / (dash + gap))
+						discard;
+					gl_FragColor = vec4(color.rgb, 1.0);
+				}
+			`
+
+			let uniforms = {
+				 canvas : {type: 'v2', value: {x: 0, y: 0}},
+				 dash   : {type: 'f' , value: 1},
+				 gap    : {type: 'f' , value: 3},
+				 color  : {value: color(axis_color)},
+			}
+
+			let mat = new THREE.ShaderMaterial({
+				uniforms       : uniforms,
+				vertexShader   : vshader,
+				fragmentShader : fshader,
+			})
+
+			let geo = new THREE.BufferGeometry().setFromPoints([v3(), p])
+			let line = new THREE.LineSegments(geo, mat)
+
+			line.update = function() {
+				mat.uniforms.canvas.value.x = pe.canvas.width
+				mat.uniforms.canvas.value.y = pe.canvas.height
+			}
+
+			return line
+
+		} else {
+
+			return line3d(line3(v3(), p), axis_color, dashed, name)
+
+		}
+	}
+
+	function axes() {
+		let M = MAXD
+		let e = new THREE.Group()
+		let green = 0x006600
+		let red   = 0x990000
+		let blue  = 0x000099
+		let axes = [
+			axis('+z_axis', v3( 0,  0, -M), green),
+			axis('+x_axis', v3( M,  0,  0), red  ),
+			axis('+y_axis', v3( 0,  M,  0), blue ),
+			axis('-z_axis', v3( 0,  0,  M), green, true),
+			axis('-x_axis', v3(-M,  0,  0), red  , true),
+			axis('-y_axis', v3( 0, -M,  0), blue , true),
+		]
+		e.add(...axes)
+		e.update = function() {
+			for (let axis of axes)
+				axis.update()
+		}
+		return e
+	}
 
 	// cursor -----------------------------------------------------------------
 
@@ -1152,6 +1210,8 @@ component('x-modeleditor', function(e) {
 
 	e.instance.invalidate()
 
+	e.instance.group.position.y = 1
+
 	print(e.scene)
 
 	// direct-manipulation tools ==============================================
@@ -1206,6 +1266,9 @@ component('x-modeleditor', function(e) {
 
 	tools.orbit.pointermove = function(e) {
 		e.controls.update()
+		e.camera.updateProjectionMatrix()
+		e.camera.getWorldDirection(e.dirlight.position)
+		e.dirlight.position.negate()
 	}
 
 	// current point hit-testing and snapping ---------------------------------
@@ -1492,6 +1555,8 @@ component('x-modeleditor', function(e) {
 		}
 		e.controls.update()
 		e.camera.updateProjectionMatrix()
+		e.camera.getWorldDirection(e.dirlight.position)
+		e.dirlight.position.negate()
 		update_overlays()
 		return false
 	})
