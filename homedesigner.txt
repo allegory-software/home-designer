@@ -1,18 +1,4 @@
 
-TODO
-------------------------------------------------------------------------------
-- snap to ref point
-- reimplement line-to-points snapping
-- overlapping lines cases
-
-
-LATERZ
-------------------------------------------------------------------------------
-- fix pan with shift
-- fix dashed lines
--
-
-
 Basic Modeling
 ------------------------------------------------------------------------------
 
@@ -25,9 +11,6 @@ Basic Modeling
 		- find embedded polygons (holes)
 			- generate meshes with earclip
 		- replace existing polygons with new polygons while preserving textures
-- select faces and lines
-- double-click to select face boundary lines
-	- double-click again to select all lines and faces.
 - del to remove selection
 - move hit point
 - move selection
