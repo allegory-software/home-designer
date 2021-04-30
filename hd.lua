@@ -9,6 +9,7 @@ require'webb_query'
 --require'x_dba'
 
 config('db_name', 'hd')
+config('db_port', 3306)
 config('db_pass', 'abcd12')
 
 require'hd_conf'
