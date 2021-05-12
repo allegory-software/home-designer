@@ -1,4 +1,6 @@
 
+if not ... then require'hd_http'; return end
+
 require'$'
 require'webb'
 require'webb_action'
@@ -8,11 +10,9 @@ require'webb_query'
 --require'xmodule'
 --require'x_dba'
 
-config('db_name', 'hd')
-config('db_port', 3306)
-config('db_pass', 'abcd12')
-
 require'hd_conf'
+
+--require'hd_install'
 
 config('root_action', 'app')
 
