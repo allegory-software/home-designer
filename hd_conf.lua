@@ -3,6 +3,7 @@ math.randomseed(require'time'.time())
 
 config('main_module', 'hd')
 config('www_dir', 'hd-www')
+config('var_dir', '.')
 
 config('db_name', 'hd')
 config('db_port', 3307)

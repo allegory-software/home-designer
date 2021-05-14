@@ -6,19 +6,16 @@ require'webb'
 require'webb_action'
 require'webb_query'
 
---require'xrowset'
---require'xmodule'
+require'xrowset'
+require'xrowset_mysql'
+require'xmodule'
 --require'x_dba'
 
 require'hd_conf'
 
 --require'hd_install'
 
-config('root_action', 'app')
-
-action.app = function()
-	out'hello'
-end
+config('root_action', 'hd.html')
 
 return function()
 	check(action(find_action(unpack(args()))))
