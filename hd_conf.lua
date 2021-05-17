@@ -1,6 +1,7 @@
 
 math.randomseed(require'time'.time())
 
+config('host', 'localhost')
 config('main_module', 'hd')
 config('www_dir', 'hd-www')
 config('var_dir', '.')

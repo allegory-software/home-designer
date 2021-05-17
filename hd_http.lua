@@ -19,9 +19,12 @@ local server = server:new{
 				key_file  = 'localhost.key',
 			},
 		},
+		{
+			--host = 'localhost',
+		},
 	},
 	debug = {
-		--protocol = true,
+		protocol = true,
 		--stream = true,
 		tracebacks = true,
 	},
