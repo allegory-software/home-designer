@@ -5,18 +5,16 @@ require'$'
 require'webb'
 require'webb_action'
 require'webb_query'
+require'webb_spa'
 
 require'xrowset'
 require'xrowset_mysql'
 require'xmodule'
-require'webb_js'
 --require'x_dba'
 
 require'hd_conf'
 
 --require'hd_install'
-
-config('root_action', 'hd')
 
 cssfile[[
 fontawesome.css
@@ -86,28 +84,30 @@ init_xmodule({
 		{slot: 'user'   , module: 'dev' , layer: 'hd-user-cosmin' },
 	],
 	root_module: 'hd',
-	root_container: '#root_container',
+	root_container: '#xmodule_root_container',
 })
 
 ]]
 
-body = [[
-
-<div id=root_container></div>
-
+local body = [[
+	<div id=xmodule_root_container></div>
+	<div id=main></div>
 ]]
 
-action.hd = function(...)
-
-	webbjs{
+action.en = function()
+	spa{
 		head = '',
 		body = body,
 		title = 'Home Designer',
+		client_action = true,
+		--js_mode = 'embed',
+		--css_mode = 'embed',
 	}
-
 end
 
+action['404.html'] = action.en
+
 return function()
-	check(action(find_action(unpack(args()))))
+	check(action(unpack(args())))
 end
 

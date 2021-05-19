@@ -24,7 +24,7 @@ local server = server:new{
 		},
 	},
 	debug = {
-		protocol = true,
+		--protocol = true,
 		--stream = true,
 		tracebacks = true,
 	},
