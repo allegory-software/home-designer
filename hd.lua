@@ -19,6 +19,7 @@ require'hd_conf'
 cssfile[[
 fontawesome.css
 x-widgets.css
+x-auth.css
 hd.css
 ]]
 
@@ -36,76 +37,29 @@ x-grid.js
 x-model3.js
 x-modeleditor.js
 x-module.js
+x-auth.js
+hd.js
 ]]
 
-js[[
+action['test.json'] = function()
+	return {
+		items = {
+			{name = 'Dude1'},
+			{name = 'Dude2'},
+		},
+	}
+end
 
-// ---------------------------------------------------------------------------
-// widgets
-// ---------------------------------------------------------------------------
-
-component('hd-main', 'Home Designer', function(e) {
-
-	selectable_widget(e)
-
-
-
-})
-
-// ---------------------------------------------------------------------------
-// main app
-// ---------------------------------------------------------------------------
-
-init_xmodule({
-	modules: {
-		hd  : {icon: 'rocket'},
-		dba : {icon: 'database'},
-		dev : {icon: 'user-cog'},
-	},
-	slots: {
-		base   : {color: '#fff', icon: 'rocket'},
-		app    : {color: '#fff', icon: 'rocket'},
-		lang   : {color: '#0f0', icon: 'globe-europe'},
-		lang2  : {color: '#0f0', icon: 'globe-americas'},
-		server : {color: '#000', icon: 'server'},
-		user   : {color: '#99f', icon: 'user'},
-	},
-	layers: [
-		//{slot: 'base'   , module: 'dba' , layer: 'dba'            },
-		//{slot: 'lang'   , module: 'dba' , layer: 'dba'            },
-		//{slot: 'server' , module: 'dba' , layer: 'dba-server'     },
-		{slot: 'base'   , module: 'hd'  , layer: 'hd'             },
-		//{slot: 'app'    , module: 'dba' , layer: 'ck'             },
-		{slot: 'lang2'  , module: 'hd'  , layer: 'hd'             },
-		{slot: 'lang'   , module: 'hd'  , layer: 'hd'             },
-		{slot: 'server' , module: 'hd'  , layer: 'hd-server'      },
-		{slot: 'user'   , module: 'hd'  , layer: 'hd-user-admin'  },
-		//{slot: 'user'   , module: 'dba' , layer: 'ck-user-cosmin' },
-		{slot: 'user'   , module: 'dev' , layer: 'hd-user-cosmin' },
-	],
-	root_module: 'hd',
-	root_container: '#xmodule_root_container',
-})
-
-]]
-
-local body = [[
-	<div id=xmodule_root_container></div>
-	<div id=main></div>
-]]
-
-action.en = function()
+action['404.html'] = function()
 	spa{
 		head = '',
-		body = body,
+		body = wwwfile('hd.html'),
 		title = 'Home Designer',
 		client_action = true,
 		--js_mode = 'embed',
 		--css_mode = 'embed',
 	}
 end
-
-action['404.html'] = action.en
 
 return function()
 	check(action(unpack(args())))

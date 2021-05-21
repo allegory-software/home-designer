@@ -1,5 +1,65 @@
 
-.hd-main {
+/* tags ------------------------------------------------------------------- */
+
+html, body {
 	margin: 0;
+	padding: 0;
+}
+
+a {
+	color: inherit;
+	text-decoration: none;
+}
+
+a:visited {
+	color: inherit;
+}
+
+/* components ------------------------------------------------------------- */
+
+.x-modeleditor {
+	flex: 1;
+	min-height: 500px;
 	border: 0;
 }
+
+.x-modeleditor:focus-within {
+	box-shadow: none;
+}
+
+/* adjectives ------------------------------------------------------------- */
+
+a.faint {
+	color: var(--x-fg-label);
+}
+
+a.faint:hover {
+	color: var(--x-fg);
+}
+
+/* identities ------------------------------------------------------------- */
+
+.header {
+	display: flex;
+	padding: 1em 1em 1em 1em;
+	margin-bottom: 1em;
+	border-bottom: 1px solid var(--x-border-light);
+}
+
+.logo {
+	flex: 1;
+	font-size: 1.5em;
+}
+
+.footer {
+	display: flex;
+	border-top: 1px solid var(--x-border-light);
+	padding: .2em 1em;
+	margin-top: 1em;
+	justify-content: center;
+}
+
+.main {
+	display: flex;
+}
+
