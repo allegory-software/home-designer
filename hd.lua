@@ -21,6 +21,8 @@ require'hd_conf'
 
 math.randomseed(require'time'.time())
 
+config('listen_https', false)
+config('listen_http', true)
 config('host', 'localhost')
 config('main_module', 'hd')
 config('www_dir', 'hd-www')
@@ -87,10 +89,12 @@ if ... == 'hd' then --used as module, required by webb's respond() call.
 end
 
 local server = server:new{
-	libs = 'sock zlib',
+	libs = 'sock zlib '..(config'listen_https' and 'sock_libtls' or ''),
 	listen = {
 		{
-			--host = 'localhost',
+			host = config('host'),
+			port = config('port'),
+			listen = config'listen_https',
 			tls = true,
 			tls_options = {
 				cert_file = 'localhost.crt',
@@ -98,7 +102,9 @@ local server = server:new{
 			},
 		},
 		{
-			--host = 'localhost',
+			host = config('host'),
+			port = config('port'),
+			listen = config'listen_http',
 		},
 	},
 	debug = {
