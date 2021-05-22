@@ -8,6 +8,11 @@ luapower/glue                master
 luapower/heap                master
 luapower/hmac                master
 luapower/http                master
+luapower/inspect             master
+luapower/libb64              master
+luapower/linebuffer          master
+luapower/lpeg                master
+luapower/luajit              master
 luapower/md5                 master
 luapower/mustache            master
 luapower/mysql_client        master
@@ -16,7 +21,9 @@ luapower/pp                  master
 luapower/sha1                master
 luapower/sha2                master
 luapower/sock                master
+luapower/stream              master
 luapower/time                master
 luapower/uri                 master
 luapower/webb                ng
 luapower/x-widgets           master
+luapower/zlib                master
