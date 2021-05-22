@@ -3,6 +3,7 @@ luapower/cjson               master
 luapower/coro                master
 luapower/dollar              master
 luapower/errors              master
+luapower/fontawesome         master
 luapower/fs                  master
 luapower/glue                master
 luapower/heap                master
@@ -16,6 +17,7 @@ luapower/luajit              master
 luapower/md5                 master
 luapower/mustache            master
 luapower/mysql_client        master
+luapower/opensans            master
 luapower/path                master
 luapower/pp                  master
 luapower/sha1                master
@@ -25,5 +27,6 @@ luapower/stream              master
 luapower/time                master
 luapower/uri                 master
 luapower/webb                ng
+luapower/webb_auth           master
 luapower/x-widgets           master
 luapower/zlib                master
