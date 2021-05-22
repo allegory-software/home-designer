@@ -87,7 +87,7 @@ if ... == 'hd' then --used as module, required by webb's respond() call.
 end
 
 local server = server:new{
-	libs = 'sock sock_libtls zlib',
+	libs = 'sock zlib',
 	listen = {
 		{
 			--host = 'localhost',
