@@ -7,7 +7,7 @@ local server = require'http_server'
 --libtls.debug = print
 
 require'$'
-local respond = require'webb'
+require'webb'
 require'webb_action'
 require'webb_query'
 require'webb_spa'
@@ -21,9 +21,6 @@ require'hd_conf'
 
 math.randomseed(require'time'.time())
 
-config('http_addr', '127.0.0.1')
-config('https_addr', false)
-config('host', 'localhost')
 config('main_module', 'hd')
 config('www_dir', 'hd-www')
 config('var_dir', '.')
@@ -82,38 +79,12 @@ action['404.html'] = function()
 	}
 end
 
-if ... == 'hd' then --used as module, required by webb's respond() call.
+if ... == 'hd' then --used as module, required by webb_respond() call.
 	return function()
 		check(action(unpack(args())))
 	end
 end
 
-local server = server:new{
-	libs = 'sock zlib '..(config'https_addr' and 'sock_libtls' or ''),
-	listen = {
-		{
-			host = config'host',
-			addr = config'https_addr',
-			port = config'https_port',
-			tls = true,
-			tls_options = {
-				cert_file = 'localhost.crt',
-				key_file  = 'localhost.key',
-			},
-		},
-		{
-			host = config'host',
-			addr = config'http_addr',
-			port = config'http_port',
-		},
-	},
-	debug = {
-		--protocol = true,
-		--stream = true,
-		tracebacks = true,
-	},
-	respond = respond,
-}
-
+local server = http_server()
 server.start()
 

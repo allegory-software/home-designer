@@ -1,1 +1,2 @@
-luajit hd_http.lua
+@set SERVICE=hd
+@call mgit service %*
