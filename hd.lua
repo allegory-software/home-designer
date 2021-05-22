@@ -93,7 +93,7 @@ local server = server:new{
 	listen = {
 		{
 			host = config('host'),
-			port = config('port'),
+			port = config'port_https',
 			listen = config'listen_https',
 			tls = true,
 			tls_options = {
@@ -103,7 +103,7 @@ local server = server:new{
 		},
 		{
 			host = config('host'),
-			port = config('port'),
+			port = config'port_http',
 			listen = config'listen_http',
 		},
 	},
