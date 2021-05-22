@@ -1,0 +1,16 @@
+MOD=hd.lua
+PID=hd.pid
+LOG=hd.log
+
+if [ ! "$1" ]; then
+	[ -f "$PID" ] && { echo "already started. pid: $(cat $PID)"; exit 1; }
+	./luajit $MOD 2>&1 >> $LOG &
+	echo "$!" > $PID
+	echo "started. pid: $(cat $PID)"
+elif [ "$1" == stop ]; then
+	[ -f "$PID" ] || { echo "file not found: $PID"; exit 1; }
+	pid="$(cat $PID)"
+	echo "stopping. pid: $pid"
+	kill $pid
+	rm $PID
+fi
