@@ -2,7 +2,6 @@
 local ffi = require'ffi'
 ffi.tls_libname = 'tls_bearssl'
 --ffi.tls_libname = 'tls_libressl'
-local server = require'http_server'
 --local libtls = require'libtls'
 --libtls.debug = print
 
@@ -32,6 +31,8 @@ config('db_pass', 'abcd12')
 config('session_secret', 'auf9#8xc@kl~24lf_a')
 config('pass_salt', 'ig9sd8l#la;,3xj')
 
+config('minify_js', true)
+
 --require'hd_install'
 
 cssfile[[
@@ -42,6 +43,8 @@ hd.css
 ]]
 
 jsfile[[
+markdown-it.js
+markdown-it-easy-tables.js
 3d.js
 gl.js
 earcut.js
