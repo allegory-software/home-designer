@@ -20,11 +20,10 @@ require'hd_conf'
 
 math.randomseed(require'time'.time())
 
-config('main_module', 'hd')
-config('www_dir', 'hd-www')
+config('app_codename', 'hd')
+
 config('var_dir', '.')
 
-config('db_name', 'hd')
 config('db_port', 3307)
 config('db_pass', 'abcd12')
 
