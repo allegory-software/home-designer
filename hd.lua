@@ -12,7 +12,7 @@ require'webb_query'
 require'webb_spa'
 
 require'xrowset'
-require'xrowset_mysql'
+require'xrowset_sql'
 require'xmodule'
 --require'x_dba'
 
