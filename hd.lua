@@ -20,7 +20,7 @@ require'hd_conf'
 
 math.randomseed(require'time'.time())
 
-config('app_codename', 'hd')
+config('app_name', 'hd')
 
 config('var_dir', '.')
 
