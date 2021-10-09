@@ -83,7 +83,7 @@ end
 
 if ... == 'hd' then --used as module, required by webb_respond() call.
 	return function()
-		check(action(unpack(args())))
+		checkfound(action(unpack(args())))
 	end
 end
 
