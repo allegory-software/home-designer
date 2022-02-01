@@ -1,4 +1,5 @@
---go@ x:\sdk\bin\windows\luajit.exe -lscite x:\hd\hd.lua -v start
+--go@ x:\sdk\bin\windows\luajit.exe -lscite x:\hd\hd.lua --debug -v start
+--go@ plink d10 strace ~/sdk/bin/linux/luajit -lscite ~/hd/hd.lua -v start
 local ffi = require'ffi'
 ffi.tls_libname = 'tls_bearssl'
 
@@ -9,7 +10,20 @@ require'xmodule'
 
 local hd = daemon'hd'
 hd.font = 'opensans'
+
+hd.server_options = {
+	debug = {
+		--protocol = win and true,
+		--stream = win and true,
+	},
+}
+
 local hd = xapp(hd)
+
+if Linux then
+	config('http_port', 8080)
+	config('http_addr', '*')
+end
 
 config('db_port', 3307)
 config('db_pass', 'root')
