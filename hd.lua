@@ -7,7 +7,9 @@ local xapp = require'xapp'
 
 require'xmodule'
 
-local hd = xapp(daemon'hd')
+local hd = daemon'hd'
+hd.font = 'opensans'
+local hd = xapp(hd)
 
 config('db_port', 3307)
 config('db_pass', 'root')
@@ -34,11 +36,11 @@ hd.js
 ]]
 
 html(function()
-	return load(indir(app_dir, 'hd.html'), nil, true)
+	return reload(indir(app_dir, 'hd.html'))
 end)
 
-action['404.html'] = function()
-	spa{
+function hd.spa(action)
+	return {
 		title = 'Home Designer',
 		client_action = true,
 		--js_mode = 'embed',

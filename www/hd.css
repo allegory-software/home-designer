@@ -1,18 +1,6 @@
 
-/* tags ------------------------------------------------------------------- */
-
-html, body {
-	margin: 0;
-	padding: 0;
-}
-
-a {
-	color: inherit;
-	text-decoration: none;
-}
-
-a:visited {
-	color: inherit;
+body {
+	flex-direction: column;
 }
 
 /* components ------------------------------------------------------------- */
@@ -62,4 +50,3 @@ a.faint:hover {
 .main {
 	display: flex;
 }
-
