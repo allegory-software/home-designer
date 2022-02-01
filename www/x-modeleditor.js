@@ -171,8 +171,6 @@ component('x-modeleditor', function(e) {
 		render()
 	}
 
-	e.detect_resize()
-
 	e.on('resize', function(r) {
 		let w = floor(r.w)
 		let h = floor(r.h)
