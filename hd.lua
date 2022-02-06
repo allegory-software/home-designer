@@ -1,4 +1,4 @@
---go@ x:\sdk\bin\windows\luajit.exe -lscite x:\hd\hd.lua --debug -v start
+--go@ x:\sdk\bin\windows\luajit.exe -lscite x:\hd\hd.lua --debug -v run
 --go@ plink d10 strace ~/sdk/bin/linux/luajit -lscite ~/hd/hd.lua -v start
 local ffi = require'ffi'
 ffi.tls_libname = 'tls_bearssl'
