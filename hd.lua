@@ -1,29 +1,11 @@
 --go@ x:\sdk\bin\windows\luajit.exe -lscite x:\hd\hd.lua --debug -v run
 --go@ plink d10 strace ~/sdk/bin/linux/luajit -lscite ~/hd/hd.lua -v start
-local ffi = require'ffi'
-ffi.tls_libname = 'tls_bearssl'
 
-require'$daemon'
-local xapp = require'xapp'
+local hd = require('$xapp')('hd', ...)
 
-require'xmodule'
+load_opensans()
 
-local hd = daemon'hd'
-hd.font = 'opensans'
-
-hd.server_options = {
-	debug = {
-		--protocol = win and true,
-		--stream = win and true,
-	},
-}
-
-local hd = xapp(hd)
-
-if Linux then
-	config('http_port', 8080)
-	config('http_addr', '*')
-end
+config('https_addr', false)
 
 config('db_port', 3307)
 config('db_pass', 'root')
@@ -31,10 +13,10 @@ config('db_pass', 'root')
 config('secret', 'auf9#8xc@klX0cz09xsdf8s8as9df~24lf_a')
 
 config('minify_js', true)
-
---require'hd_install'
+config('favicon_href', '/favicon1.ico')
 
 cssfile[[
+x-modeleditor.css
 hd.css
 ]]
 
@@ -50,16 +32,9 @@ hd.js
 ]]
 
 html(function()
-	return reload(indir(app_dir, 'hd.html'))
+	return reload(indir(hd.dir, 'hd.html'))
 end)
 
-function hd.spa(action)
-	return {
-		title = 'Home Designer',
-		client_action = true,
-		--js_mode = 'embed',
-		--css_mode = 'embed',
-	}
-end
+config('page_title_suffix', 'Home Designer')
 
 return hd:run(...)
