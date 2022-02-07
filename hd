@@ -1,1 +1,2 @@
-SERVICE=hd mgit service "$@"
+#!/bin/sh
+exec "${0%hd}/sdk/bin/linux/luajit" "${0%hd}/hd.lua" "$@"
