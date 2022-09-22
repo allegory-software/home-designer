@@ -28,7 +28,7 @@ model3_component = function(pe) {
 
 	function log(s, ...args) {
 		assert(LOG)
-		print(e.id, s, ...args)
+		pr(e.id, s, ...args)
 	}
 
 	// model (as in MVC and as in 3D model) -----------------------------------

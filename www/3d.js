@@ -2777,7 +2777,7 @@ poly3_class.regions = function() {
 			return e1[0] < e2[0] ? -1 : 1
 	})
 
-	// for (let e of edges) { print('e', e[0]+1, e[1]+1) }
+	// for (let e of edges) { pr('e', e[0]+1, e[1]+1) }
 
 	// step 4: make wedges from edge groups formed by edges with the same p1.
 	let wedges = [] // [[p1i, p2i, p3i, used], ...]
@@ -2794,7 +2794,7 @@ poly3_class.regions = function() {
 		}
 	}
 
-	// for (let w of wedges) { print('w', w[0]+1, w[1]+1, w[2]+1) }
+	// for (let w of wedges) { pr('w', w[0]+1, w[1]+1, w[2]+1) }
 
 	// phase 2: group wedges into regions.
 
@@ -2806,7 +2806,7 @@ poly3_class.regions = function() {
 			return w1[0] < w2[0] ? -1 : 1
 	})
 
-	// for (let w of wedges) { print('w', w[0]+1, w[1]+1, w[2]+1) }
+	// for (let w of wedges) { pr('w', w[0]+1, w[1]+1, w[2]+1) }
 
 	// step 2: mark all wedges as unused (already did on construction).
 	// step 3, 4, 5: find contiguous wedges and group them into regions.
@@ -2837,7 +2837,7 @@ poly3_class.regions = function() {
 		}
 	}
 
-	// for (let r of regions) { print('r', r.map(i => i+1)) }
+	// for (let r of regions) { pr('r', r.map(i => i+1)) }
 
 	this._regions = regions
 	return regions
@@ -2854,7 +2854,7 @@ function test_plane_graph_regions() {
 	let get_point = function(i, out) { out.set(points[i]); return out }
 	let lines  = [0,1, 0,2,  1,2, 1,3, 2,4, 3,4,  ] // 5,6, 5,7, 6,8, 7,8,  0,9, 9,10]
 	let rt = plane_graph_regions(v3(0, 0, 1), get_point, lines)
-	for (let r of rt) { print(r.map(i => i+1)) }
+	for (let r of rt) { pr(r.map(i => i+1)) }
 }
 // test_plane_graph_regions()
 */

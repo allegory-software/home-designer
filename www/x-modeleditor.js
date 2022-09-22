@@ -15,7 +15,7 @@ component('x-modeleditor', function(e) {
 
 	function log(s, ...args) {
 		assert(LOG)
-		print(s, ...args)
+		pr(s, ...args)
 	}
 
 	// colors ------------------------------------------------------------------
@@ -141,7 +141,7 @@ component('x-modeleditor', function(e) {
 		//ground_rr.draw(prog)
 		draw_model(prog)
 		if (TRACE)
-			print(gl.stop_trace())
+			pr(gl.stop_trace())
 		helper_lines_rr.draw(prog)
 	}
 
@@ -1922,7 +1922,7 @@ component('x-modeleditor', function(e) {
 			style: `
 				width  : 48px;
 				height : 48px;
-				background-color: #${hex3(m.diffuse_color)};
+				background-color: #${m.diffuse_color.base(16, 6)};
 				pointer-events: none; /* dblclick pass-through */
 			`
 		})

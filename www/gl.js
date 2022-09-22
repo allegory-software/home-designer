@@ -237,8 +237,8 @@ gl.shader = function(type, name, gl_type, code) {
 
 	if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
 		let errors = gl.getShaderInfoLog(shader)
-		print(errors)
-		print(linenumbers(shader.raw_code, errors))
+		pr(errors)
+		pr(linenumbers(shader.raw_code, errors))
 		gl.deleteShader(shader)
 		assert(false, '{0} shader compilation failed for program {1}', type, name)
 	}
@@ -337,11 +337,11 @@ gl.program = function(pr_name, vs_code, fs_code) {
 	gl.validateProgram(pr)
 
 	if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) {
-		print(gl.getProgramInfoLog(pr))
-		print('VERTEX SHADER')
-		print(vs_code)
-		print('FRAGMENT SHADER')
-		print(fs_code)
+		pr(gl.getProgramInfoLog(pr))
+		pr('VERTEX SHADER')
+		pr(vs_code)
+		pr('FRAGMENT SHADER')
+		pr(fs_code)
 		gl.deleteProgram(pr)
 		gl.deleteShader(vs)
 		gl.deleteShader(fs)

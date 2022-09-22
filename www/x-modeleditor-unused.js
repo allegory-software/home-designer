@@ -1,6 +1,6 @@
 // line-line-intersection ----------------------------------------------------
 
-// print(line_line_intersection(line3(v3(0, 0, 0), v3(1, 0, 0)), line3(v3(0, 1, 0), v3(1, 1, 0))))
+// pr(line_line_intersection(line3(v3(0, 0, 0), v3(1, 0, 0)), line3(v3(0, 1, 0), v3(1, 1, 0))))
 
 /*
 	// alt. impl using cross vectors
