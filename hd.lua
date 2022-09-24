@@ -46,7 +46,7 @@ cmd('install [forealz]', 'Install or migrate the app', function(opt, doit)
 		insert_or_update_row('tenant', {
 			tenant = 1,
 			name = 'test',
-			host = config'domain',
+			host = config'host',
 		})
 		usr_create_or_update{
 			tenant = 1,
