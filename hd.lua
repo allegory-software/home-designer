@@ -38,23 +38,4 @@ htmlfile'hd.html'
 
 hd.schema:import(hd_schema)
 
-cmd('install [forealz]', 'Install or migrate the app', function(opt, doit)
-	create_db()
-	local dry = doit ~= 'forealz'
-	db():sync_schema(hd.schema, {dry = dry})
-	if not dry then
-		insert_or_update_row('tenant', {
-			tenant = 1,
-			name = 'test',
-			host = config'host',
-		})
-		usr_create_or_update{
-			tenant = 1,
-			email = config'dev_email',
-			roles = 'dev admin',
-		}
-	end
-	say'Install done.'
-end)
-
 return hd:run()
