@@ -1,0 +1,73 @@
+
+- draw facade
+
+- have objects draw and interect themselves on plan and on facade
+
+- hit test rotated rect
+- drag opening
+	- move along walls
+	- resize by each end
+	- move outside walls on the empty space
+	- auto-shrink to fit free space on the wall + padding
+	- constrain position to free space when moving and resizing
+
+- select object: opening
+	- properties popup
+		- door   : flip v, flip h, resize 60..100
+		- window : select from list
+- deselect object by clicking on empty space
+
+- furniture:
+	- round dining table: 3, 4, 5 chairs
+		- rotate in multiples of 360/6, 360/8, 360/10
+	- square dining table: 2, 3, 4 chairs
+		- rotate in multiples of 45, 90
+		- align to walls
+	- rect dining table: 2, 4, 6, 8, 10, 12 chairs
+		- rotate in multiples of 45, 90
+		- align to walls
+	- bed: 90, 140, 160, 180 x 200
+		- align to walls
+	- desk: 50, 60, 70, 80 x 120, 140, 160, 200, custom
+		- rotate 45, 90
+		- align to walls
+	- fridge: normal, double
+		- align to walls
+	- kitchen countertop: follow the wall for I, L, U shape
+		- range: 1, 2, 4 burners
+		- sink: round, normal, double, normal+dripper
+		- act as wall for other things to align to
+	- kitchen island:
+		- range, sink: align to margins
+		- act as wall for other things to align to
+	- kitchen top cabinets
+	- dining chair
+	- armchair
+	- couch: 2, 3, L; a few styles
+	- washing machine
+	- toilet: align to wall, align to corner; few styles (in-wall, etc.)
+	- bathtub: corner, 140, .. ?
+	- shower: corner, square, rectangle; few styles
+		- align to corner or 3 walls
+	- bathroom sink: normal, large, small, corner
+	- radiator:
+		- align to walls
+	- outlet
+		- align to walls
+	- light fixture
+	- light switch
+	- cabinet: 40..60 x variable; doors: 30..60
+
+- window editor
+	- number of panes: 1, 2, 3, 4, 5
+	- each pane: mobile or fixed
+	- thickness: normal, thin
+
+- cabinet editor
+	- ??
+
+- stairs:
+	-
+
+- make everything work under rotation
+
