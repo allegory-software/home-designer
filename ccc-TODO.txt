@@ -1,5 +1,7 @@
 
-- draw facade
+- refactor walls array
+
+- draw facade shadow triangles
 
 - have objects draw and interect themselves on plan and on facade
 
