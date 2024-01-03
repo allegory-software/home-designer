@@ -1,7 +1,13 @@
 
-- refactor walls array
+- move int. walls
+
+- move butt-joined int. walls when moving ext. walls or int. walls
+
+- constrain wall movement to int. walls
 
 - draw facade shadow triangles
+
+- draw facade obscuring walls with transparent color.
 
 - have objects draw and interect themselves on plan and on facade
 

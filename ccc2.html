@@ -11,28 +11,38 @@
 <script src=ui_grid.js></script>
 <script>
 
-function wall_x(a, i) {
+function wall_x_direct(a, i) {
 	let vert = i & 1
-	return a[mod(i-2+vert, a.length)]
+	return a[mod(i-2+vert, a.length)].to
 }
 
-function wall_y(a, i) {
+function wall_y_direct(a, i) {
 	let vert = i & 1
-	return a[mod(i-1-vert, a.length)]
+	return a[mod(i-1-vert, a.length)].to
 }
 
-function wall_X(a, i) { return a[mod(i  , a.length)] }
-function wall_Y(a, i) { return a[mod(i-1, a.length)] }
+function wall_x(a, i, o) {
+	assert(!o)
+	return wall_x_direct(a, i)
+}
 
-function wall_set_X(a, i, v) { a[mod(i  , a.length)] = v }
-function wall_set_Y(a, i, v) { a[mod(i-1, a.length)] = v }
+function wall_y(a, i, o) {
+	assert(!o)
+	return wall_y_direct(a, i)
+}
+
+function wall_X(a, i) { return a[mod(i  , a.length)].to }
+function wall_Y(a, i) { return a[mod(i-1, a.length)].to }
+
+function wall_set_X(a, i, v) { a[mod(i  , a.length)].to = v }
+function wall_set_Y(a, i, v) { a[mod(i-1, a.length)].to = v }
 
 function wall_point_direct(a, i) {
 	let vert = i & 1
 	let n = a.length
 	let ix = mod(i-2+vert, n)
 	let iy = mod(i-1-vert, n)
-	return [a[ix], a[iy]]
+	return [a[ix].to, a[iy].to]
 }
 
 function wall_line(a, i) { // points in draw order
@@ -42,7 +52,7 @@ function wall_line(a, i) { // points in draw order
 	let iy1 = mod(i-1-vert, n)
 	let ix2 = mod(i+0-vert, n)
 	let iy2 = mod(i-1+vert, n)
-	return [a[ix1], a[iy1], a[ix2], a[iy2]]
+	return [a[ix1].to, a[iy1].to, a[ix2].to, a[iy2].to]
 }
 
 function wall_vert  (a, i) { return i & 1 }
@@ -52,27 +62,30 @@ function wall_sign(a, i) {
 	let n = a.length
 	let iX1 = mod(i-2, n)
 	let iX2 = mod(i+0, n)
-	return sign(a[iX2] - a[iX1])
+	return sign(a[iX2].to - a[iX1].to)
 }
 
-function wall_point(a, i, o) {
+function wall_point(a, i, oX, oY) {
+	oY = oY ?? oX
 	let p = wall_point_direct(a, i)
-	if (!o)
+	if (!(oX || oY))
 		return p
 	let h1 = wall_horiz(a, i)
 	let s1 = wall_sign (a, i+0)
 	let s0 = wall_sign (a, i-1)
-	let ox = 0
-	let oy = 0
+	let sx = 0
+	let sy = 0
 	if (s1 == s0) {
-		ox =  s1
-		oy = -s1
+		sx =  s1
+		sy = -s1
 	} else {
-		ox = (s1 < s0) == h1 ? 1 : -1
-		oy = ox
+		sx = (s1 < s0) == h1 ? 1 : -1
+		sy = sx
 	}
-	p[0] += ox * o
-	p[1] += oy * o
+	let ox = h1 ? oX : oY
+	let oy = h1 ? oY : oX
+	p[0] += sx * ox
+	p[1] += sy * oy
 	return p
 }
 
@@ -117,18 +130,22 @@ function wall_rect(a, i, o) {
 	return r
 }
 
-function opening_rect(plan, op) {
-	let t = plan.ext_wall_thickness
-	let r = [op.sx, op.sy || 0, op.w, t, 0]
-	let a = plan.ext_walls
-	if (op.wall != null) {
-		let p1    = wall_point       (a, op.wall)
-		let horiz = wall_horiz       (a, op.wall)
-		let dir   = wall_sign        (a, op.wall)
-		let odir  = wall_offset_sign (a, op.wall)
+let comp = {}
+
+comp.opening = {}
+
+comp.opening.plan_rect = function(e, wall_run, i) {
+	let t = wall_run.thickness ?? 5
+	let r = [e.sx, e.sy || 0, e.w, t, 0]
+	let a = wall_run.segments
+	if (i != null) {
+		let p1    = wall_point       (a, i)
+		let horiz = wall_horiz       (a, i)
+		let dir   = wall_sign        (a, i)
+		let odir  = wall_offset_sign (a, i)
 		let X = horiz ? 0 : 1
 		let Y = horiz ? 1 : 0
-		r[X] = p1[X] + (dir > 0 ? op.d : -(op.d + op.w))
+		r[X] = p1[X] + (dir > 0 ? e.d : -(e.d + e.w))
 		r[Y] = p1[Y] + (odir > 0 ? 0 : -t)
 		if (!horiz) {
 			r[4] = 90 * rad
@@ -138,63 +155,67 @@ function opening_rect(plan, op) {
 	return r
 }
 
-function opening_face_rect(plan, op) {
-	let t = plan.ext_wall_thickness
-	let r = [op.x, plan.h - op.h - (op.y || 0), op.w, op.h]
-	let a = plan.ext_walls
-	if (op.wall != null) {
-		let p1    = wall_point       (a, op.wall)
-		let horiz = wall_horiz       (a, op.wall)
-		let dir   = wall_sign        (a, op.wall)
-		let odir  = wall_offset_sign (a, op.wall)
+comp.opening.face_rect = function(e, wall_run, wall_i) {
+	let t = wall_run.thickness
+	let r = [e.x, wall_run.h - e.h - (e.y || 0), e.w, e.h]
+	let a = wall_run.segments
+	if (wall_i != null) {
+		let p1    = wall_point       (a, wall_i)
+		let horiz = wall_horiz       (a, wall_i)
+		let dir   = wall_sign        (a, wall_i)
+		let odir  = wall_offset_sign (a, wall_i)
 		let X = 1-horiz
 		let Y = horiz
-		r[0] = p1[X] + (dir > 0 ? op.d : -(op.d + op.w))
+		r[0] = p1[X] + (dir > 0 ? e.d : -(e.d + e.w))
 	}
 	return r
 }
 
-function moving_ranges(plan, ti1) {
-	let o = plan.ext_wall_thickness
-	let a = plan.ext_walls
+function moving_ranges(plan, wall_run, ti1) {
+	let o = wall_run.thickness
+	let a = wall_run.segments
 	let n = a.length
 	let ti0 = mod(ti1-1, n)
 	let ti2 = mod(ti1+1, n)
 	let p1 = wall_point(a, ti1)
 	let p2 = wall_point(a, ti2)
-	let h = wall_horiz(a, ti1)
+	let h  = wall_horiz(a, ti1)
 	let X = h ? 0 : 1
 	let Y = h ? 1 : 0
 	let tl = wall_lines(a, ti1, o)
 
-	// collision with walls
+	// collision with other walls
 	let rangeY = [-1/0, 1/0]
-	for (let i1 = 0; i1 < n; i1++) {
-		if (i1 == ti1 || i1 == ti0 || i1 == ti2)
-			continue
-		let r = wall_rect(a, i1, o)
+	for (let wall_run1 of plan.wall_runs) {
+		let a = wall_run1.segments
+		let n = a.length
+		for (let i1 = 0; i1 < n; i1++) {
+			if (wall_run1 == wall_run && (i1 == ti1 || i1 == ti0 || i1 == ti2))
+				continue
+			let r = wall_rect(a, i1, o)
 
-		if (r[Y+2] <= tl[0][Y]) // rect bottom side < top of the wall
-			if (overlap_segs(tl[0][X], tl[1][X], r[X], r[X+2])) {
-				let minY = r[Y+2]+1
-				if (tl[0][Y] < p1[Y]) // offset side up
-					minY += o
-				rangeY[0] = max(rangeY[0], minY)
-			}
+			if (r[Y+2] <= tl[0][Y]) // rect bottom side < top of the wall
+				if (overlap_segs(tl[0][X], tl[1][X], r[X], r[X+2])) {
+					let minY = r[Y+2]+1
+					if (tl[0][Y] < p1[Y]) // offset side up
+						minY += o
+					rangeY[0] = max(rangeY[0], minY)
+				}
 
-		if (r[Y+0] >= tl[2][Y]) // rect top side > bottom of the wall
-			if (overlap_segs(tl[2][X], tl[3][X], r[X], r[X+2])) {
-				let maxY = r[Y+0]-1
-				if (tl[2][Y] > p1[Y]) // offset side down
-					maxY -= o
-				rangeY[1] = min(rangeY[1], maxY)
-			}
+			if (r[Y+0] >= tl[2][Y]) // rect top side > bottom of the wall
+				if (overlap_segs(tl[2][X], tl[3][X], r[X], r[X+2])) {
+					let maxY = r[Y+0]-1
+					if (tl[2][Y] > p1[Y]) // offset side down
+						maxY -= o
+					rangeY[1] = min(rangeY[1], maxY)
+				}
 
+		}
 	}
 	return [rangeY]
 }
 
-function draw_walls(cx, plan, a, hs) {
+function begin_closed_wall_path(cx, a, t) {
 
 	let n = a.length
 
@@ -202,7 +223,7 @@ function draw_walls(cx, plan, a, hs) {
 
 	// draw offset path clockwise.
 	for (let i = 0; i < n; i++) {
-		let [x, y] = wall_point(a, i, plan.ext_wall_thickness)
+		let [x, y] = wall_point(a, i, t)
 		if (i == 0)
 			cx.moveTo(x, y)
 		else
@@ -220,65 +241,118 @@ function draw_walls(cx, plan, a, hs) {
 			cx.lineTo(x, y)
 	}
 	cx.closePath()
-
-	cx.lineWidth = 1
-	//cx.strokeStyle = ui.fg_color('text')
-	cx.fillStyle = ui.bg_color('bg3')
-	cx.fill()
 }
 
-function draw_openings(cx, plan, a, hs) {
-	for (let op of plan.openings) {
-		let [x, y, w, h, rotation] = opening_rect(plan, op)
+function begin_open_wall_path(cx, a, t) {
 
-		cx.save()
-		cx.translate(x, y)
-		cx.rotate(rotation)
+	let n = a.length-1
 
-		cx.beginPath()
-		cx.rect(0, 0, w, h)
-		cx.fillStyle = ui.bg_color('bg')
-		cx.fill()
+	cx.beginPath()
 
-		if (op.type == 'window') {
-			cx.beginPath()
-			cx.rect(.5, .5 - 4, w, h + 4)
-			cx.moveTo(.5, .5 + round(h / 3))
-			cx.lineTo(.5 + w, .5 + round(h / 3))
-		} else if (op.type == 'door') {
-			cx.beginPath()
-			cx.arc(.5, .5 + round(h / 2), .5 + w, 0, 90 * rad)
-			cx.lineTo(.5, .5 + round(h / 2))
+	// draw non-offset path.
+	for (let i = 0; i < n; i++) {
+		let [x, y] = wall_point(a, i)
+		if (i == 0)
+			cx.moveTo(x, y)
+		else
+			cx.lineTo(x, y)
+	}
+
+	// draw offset path in reverse.
+	for (let i = n-1; i >= 0; i--) {
+		let [x, y] = wall_point(a, i, t, i == 0 || i == n-1 ? 0 : t)
+		cx.lineTo(x, y)
+	}
+
+	cx.closePath()
+}
+
+function draw_wall_openings(cx, wall_run, hs) {
+	let wall_i = 0
+	for (let wall of wall_run.segments) {
+		if (wall.openings) {
+			for (let op of wall.openings) {
+				let [x, y, w, h, rotation] = comp.opening.plan_rect(op, wall_run, wall_i)
+
+				cx.save()
+				cx.translate(x, y)
+				cx.rotate(rotation)
+
+				cx.beginPath()
+				cx.rect(0, 0, w, h)
+				cx.fillStyle = ui.bg_color('bg')
+				cx.fill()
+
+				if (op.type == 'window') {
+					cx.beginPath()
+					cx.rect(.5, .5 - 4.5, w, h + 4.5)
+					cx.moveTo(    .5, round(h / 3) - .5)
+					cx.lineTo(w - .5, round(h / 3) - .5)
+				} else if (op.type == 'door') {
+					cx.beginPath()
+					cx.arc(.5, round(h / 2) + .5, w - .5, 0, (op.swing ?? 90) * rad)
+					cx.lineTo(.5, round(h / 2) - .5)
+				}
+				cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
+				cx.stroke()
+
+				cx.restore()
+			}
 		}
-		cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
-		cx.stroke()
-
-		cx.restore()
+		wall_i++
 	}
 }
 
-function draw_facade(cx, plan, a, horiz, sign, hs) {
+function draw_walls(cx, plan, hs) {
+
+	// draw walls
+	for (let wall_run of plan.wall_runs) {
+		let t = wall_run.thickness * (wall_run.offset_sign ?? 1)
+		let a = wall_run.segments
+		if (wall_run.closed)
+			begin_closed_wall_path(cx, a, t)
+		else
+			begin_open_wall_path(cx, a, t)
+
+		//cx.lineWidth = 1
+		// cx.strokeStyle = ui.fg_color('text')
+		// cx.stroke()
+		cx.fillStyle = ui.bg_color('bg3')
+		cx.fill()
+
+		draw_wall_openings(cx, wall_run, hs)
+
+	}
+}
+
+function draw_facade(cx, plan, horiz, sign, hs) {
 
 	// sort walls by depth.
 	let walls = []
-	for (let i = 0, n = a.length; i < n; i++) {
-		if (wall_horiz(a, i) != horiz)
+	for (let wall_run of plan.wall_runs) {
+		if (!wall_run.exterior)
 			continue
-		if (wall_sign(a, i) != sign)
-			continue
-		walls.push(i)
+		let a = wall_run.segments
+		for (let i = 0, n = a.length; i < n; i++) {
+			if (wall_horiz(a, i) != horiz)
+				continue
+			if (wall_sign(a, i) != sign)
+				continue
+			walls.push([wall_run, i])
+		}
 	}
-	walls.sort(function(i1, i2) {
-		let y1 = wall_Y(a, i1)
-		let y2 = wall_Y(a, i2)
+	walls.sort(function(e1, e2) {
+		let y1 = wall_Y(e1[0].segments, e1[1])
+		let y2 = wall_Y(e2[0].segments, e2[1])
 		return y1 < y2 ? sign : y1 > y2 ? -sign : 0
 	})
 
 	// draw walls in depth order.
 	let X = horiz ? 0 : 1
 	let Y = horiz ? 1 : 0
-	for (let i of walls) {
-		let t = plan.ext_wall_thickness
+	for (let [wall_run, i] of walls) {
+		let a = wall_run.segments
+		let t = wall_run.thickness
 		let p1 = wall_point(a, i+0, t)
 		let p2 = wall_point(a, i+1, t)
 		let x1 = p1[X]
@@ -286,7 +360,7 @@ function draw_facade(cx, plan, a, horiz, sign, hs) {
 		let x = min(x1, x2)
 		let w = max(x1, x2) - x
 		let y = p1[Y]
-		let h = plan.h
+		let h = wall_run.h
 
 		cx.beginPath()
 		cx.rect(x, 0, w, h)
@@ -299,35 +373,85 @@ function draw_facade(cx, plan, a, horiz, sign, hs) {
 		cx.stroke()
 
 		// draw openings.
-		for (let op of plan.openings) {
-			if (op.wall != i)
-				continue
+		let wall = a[i]
+		let ops = wall.openings
+		if (ops) {
+			for (let op of ops) {
 
-			let [x, y, w, h] = opening_face_rect(plan, op)
+				let [x, y, w, h] = comp.opening.face_rect(op, wall_run, i)
 
-			cx.save()
-			cx.translate(x, y)
+				cx.save()
+				cx.translate(x, y)
 
-			cx.beginPath()
-			cx.rect(0, 0, w, h)
-			cx.fillStyle = ui.bg_color('bg')
-			cx.fill()
-
-			if (op.type == 'window') {
 				cx.beginPath()
-				cx.rect(.5, .5, w, h)
-			} else if (op.type == 'door') {
-				cx.beginPath()
-				cx.rect(.5, .5, w, h)
+				cx.rect(0, 0, w, h)
+				cx.fillStyle = ui.bg_color('bg')
+				cx.fill()
+
+				if (op.type == 'window') {
+					cx.beginPath()
+					cx.rect(.5, .5, w, h)
+				} else if (op.type == 'door') {
+					cx.beginPath()
+					cx.rect(.5, .5, w, h)
+				}
+				cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
+				cx.stroke()
+
+				cx.restore()
 			}
-			cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
-			cx.stroke()
-
-			cx.restore()
 		}
 
 	}
 
+}
+
+function hit_opening(wall_run, x00, y00, id) {
+	let wall_i = -1
+	for (let wall of wall_run.segments) {
+		wall_i++
+		if (!wall.openings)
+			continue
+		for (let op of wall.openings) {
+			let [x, y, w, h, rotation] = comp.opening.plan_rect(op, wall_run, wall_i)
+
+			let cx = ui.cx
+			cx.save()
+			cx.translate(x00 + x, y00 + y)
+			cx.rotate(rotation)
+			ui.update_mouse()
+			let hit = ui.hit_rect(- 5, - 5, w + 10, h + 10)
+			cx.restore()
+			ui.update_mouse()
+
+			if (hit) {
+				let hs = ui.hover(id)
+				hs.set('opening', op)
+				return true
+			}
+		}
+	}
+}
+
+function hit_walls(wall_run, x00, y00, id) {
+	let a = wall_run.segments
+	for (let i = 0, n = a.length; i < n; i++) {
+		let x  = x00 + wall_x(a, i+0)
+		let y  = y00 + wall_y(a, i+0)
+		let x2 = x00 + wall_x(a, i+1)
+		let y2 = y00 + wall_y(a, i+1)
+		let h = y2 == y
+		if (
+			(!h && abs(ui.mx - x) < 5 && ui.my >= min(y, y2) && ui.my <= max(y, y2)) ||
+			( h && abs(ui.my - y) < 5 && ui.mx >= min(x, x2) && ui.mx <= max(x, x2))
+		) {
+			let hs = ui.hover(id)
+			hs.set('wall_run', wall_run)
+			hs.set('pi', i)
+			hs.set('side', h ? 'y' : 'x')
+			return true
+		}
+	}
 }
 
 let PLAN_ID     = ui.S-1
@@ -336,8 +460,6 @@ let PLAN_STRUCT = ui.S+0
 ui.box_widget('plan', {
 
 	create: function(cmd, id, fr, align, valign, min_w, min_h, plan) {
-
-		let a = plan.ext_walls
 
 		let [dstate, dx, dy] = ui.drag(id)
 
@@ -357,13 +479,15 @@ ui.box_widget('plan', {
 		if (dstate == 'drag') {
 			let side = hs.get('side')
 			if (side) {
+				let wall_run = hs.get('wall_run')
 				let pi = hs.get('pi')
+				let a = wall_run.segments
 				ui.set_cursor(cursors[side])
 				cs.set('side', side)
 				cs.set('pi'  , pi)
 				cs.set('px0' , wall_x(a, pi))
 				cs.set('py0' , wall_y(a, pi))
-				cs.set('rs'  , moving_ranges(plan, pi))
+				cs.set('rs'  , moving_ranges(plan, wall_run, pi))
 			}
 			let opening = hs.get('opening')
 			if (opening) {
@@ -373,6 +497,7 @@ ui.box_widget('plan', {
 		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
 			let side = cs.get('side')
 			if (side) {
+				let a  = cs.get('wall_run').segments
 				let pi = cs.get('pi')
 				let rs = cs.get('rs')
 				ui.set_cursor(cursors[side])
@@ -402,7 +527,6 @@ ui.box_widget('plan', {
 		let h    = a[i+3]
 		let id   = a[i+PLAN_ID]
 		let plan = a[i+PLAN_STRUCT]
-		let ps = plan.ext_walls
 
 		let hs = ui.hit(id)
 
@@ -412,23 +536,22 @@ ui.box_widget('plan', {
 
 		cx.translate(x00, y00)
 
-		draw_walls(cx, plan, ps, hs)
-		draw_openings(cx, plan, hs)
+		draw_walls(cx, plan, hs)
 
 		cx.translate(0,  500)
-		draw_facade(cx, plan, ps, 1, -1, hs)
+		draw_facade(cx, plan, 1, -1, hs)
 		cx.translate(0, -500)
 
 		cx.translate(0,  600)
-		draw_facade(cx, plan, ps, 1, 1, hs)
+		draw_facade(cx, plan, 1, 1, hs)
 		cx.translate(0, -600)
 
 		cx.translate( 500, 0)
-		draw_facade(cx, plan, ps, 0, 1, hs)
+		draw_facade(cx, plan, 0, 1, hs)
 		cx.translate(-500, 0)
 
 		cx.translate(500 ,  100)
-		draw_facade(cx, plan, ps, 0, -1, hs)
+		draw_facade(cx, plan, 0, -1, hs)
 		cx.translate(-500, -100)
 
 		cx.translate(-x00, -y00)
@@ -443,42 +566,19 @@ ui.box_widget('plan', {
 		let h    = a[i+3]
 		let id   = a[i+PLAN_ID]
 		let plan = a[i+PLAN_STRUCT]
-		let ps = plan.ext_walls
 
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
 
 		if (!cs) {
 
-			for (let op of plan.openings) {
-				let [x, y, w, h, angle] = opening_rect(plan, op)
-				if (ui.hit_rect(x00 + x, y00 + y, w, h)) {
-					let hs = ui.hover(id)
-					hs.set('opening', op)
+			for (let wall_run of plan.wall_runs)
+				if (hit_opening(wall_run, x00, y00, id))
 					return
-				}
-			}
 
-			let n = ps.length
-			for (let i = 0; i < n; i++) {
-				let x  = x00 + wall_x(ps, i+0) + .5
-				let y  = y00 + wall_y(ps, i+0) + .5
-				let x2 = x00 + wall_x(ps, i+1) + .5
-				let y2 = y00 + wall_y(ps, i+1) + .5
-				if (x2 == x) { // vert
-					if (abs(ui.mx - x) < 5 && ui.my >= min(y, y2) && ui.my <= max(y, y2)) {
-						let hs = ui.hover(id)
-						hs.set('pi', i)
-						hs.set('side', 'x')
-					}
-				} else if (y2 == y) { // horiz
-					if (abs(ui.my - y) < 5 && ui.mx >= min(x, x2) && ui.mx <= max(x, x2)) {
-						let hs = ui.hover(id)
-						hs.set('pi', i)
-						hs.set('side', 'y')
-					}
-				}
-			}
+			for (let wall_run of plan.wall_runs)
+				if (hit_walls(wall_run, x00, y00, id))
+					return
 
 		}
 
@@ -487,17 +587,43 @@ ui.box_widget('plan', {
 })
 
 let plan = {
-	h: 80,
-	ext_walls: [100, 100, 200, 200, 100, 300, 150, 400, 0, 0],
-	ext_wall_thickness: 5,
-	int_walls: [
-		{},
-		{},
-	],
-	openings: [
-		{wall: 9, d: 50, w: 150, type: 'window', h: 50, y: 20},
-		{wall: 8, d: 20, w:  50, type: 'door', h: 70},
-		{type: 'window', sx: 700, sy: 700, w: 100, h: 70, y: 20},
+	wall_runs: [
+		{
+			h: 80,
+			exterior: true,
+			closed: true,
+			thickness: 5,
+			segments: [
+				{to: 100,},
+				{to: 100,},
+				{to: 200,},
+				{to: 200,},
+				{to: 100, openings: [
+					{type: 'door', d: 20, w: 50, h: 70},
+				]},
+				{to: 300,},
+				{to: 150,},
+				{to: 400,},
+				{to:   0,},
+				{to:   0, openings: [
+					{type: 'window', d: 50, w: 150, h: 50, y: 20},
+				]},
+			],
+		},
+		{
+			h: 80,
+			thickness: 3,
+			offset_sign: 1,
+			segments: [
+				{to: 100}, // "null" horizontal wall because we always start horizontal
+				{to: 150},
+				{to: 0, openings: [
+					{type: 'door', d: 10, w: 40, h: 70, swing: 45},
+				]},
+				{to: 100}, // y0
+				{to: 100}, // x0
+			],
+		},
 	],
 }
 
