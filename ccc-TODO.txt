@@ -1,17 +1,19 @@
 
-- move int. walls
+- FINISH: move butt-joined int. walls when moving ext. walls or int. walls
 
-- move butt-joined int. walls when moving ext. walls or int. walls
+- TODO: multiple storeys & aligned walls
 
-- constrain wall movement to int. walls
+- TODO: constrain wall movement to multiple ranges
+	- TODO: constrian wall movement to min. length of shrinking walls.
 
-- draw facade shadow triangles
+- TODO: constrain wall movement to openings
 
 - draw facade obscuring walls with transparent color.
 
-- have objects draw and interect themselves on plan and on facade
+- draw facade shadow triangles
 
-- hit test rotated rect
+- have objects draw themselves on plan and on facade
+
 - drag opening
 	- move along walls
 	- resize by each end
@@ -78,4 +80,3 @@
 	-
 
 - make everything work under rotation
-
