@@ -1,7 +1,8 @@
 
-- FINISH: fit-to-container scalable drawing & hit-testing
-	- TODO: fix plan hit-testing bugs
+- FINISH: scalable drawing
 	- TODO: scalable facade draw & hit-test
+	- TODO: zoom in/out/reset
+	- TODO: fixate scale while dragging
 
 - TODO: fix opening rotation bug
 

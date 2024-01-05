@@ -248,9 +248,10 @@ function aligned_walls(plan, wr, i) {
 
 let comp = {}
 
-comp.opening = {}
+comp.door   = {}
+comp.window = {}
 
-comp.opening.plan_rect = function(e, wr, i) {
+comp.door.plan_rect = function(e, wr, i) {
 	let t = wr.thickness ?? 5
 	let r = [e.sx, e.sy || 0, e.w, t, 0]
 	if (i != null) {
@@ -273,8 +274,9 @@ comp.opening.plan_rect = function(e, wr, i) {
 	}
 	return r
 }
+comp.window.plan_rect = comp.door.plan_rect
 
-comp.opening.face_rect = function(e, wr, i, storey) {
+comp.door.face_rect = function(e, wr, i, storey) {
 	let t = wr.thickness
 	let r = [e.x, storey.h - e.h - (e.y || 0), e.w, e.h]
 	if (i != null) {
@@ -288,6 +290,40 @@ comp.opening.face_rect = function(e, wr, i, storey) {
 	}
 	return r
 }
+comp.window.face_rect = comp.door.face_rect
+
+comp.door.draw_plan = function(cx, e, w, h, hs) {
+	cx.beginPath()
+	cx.arc(.5, round(h / 2) + .5, max(0, w - .5), 0, (e.swing ?? 90) * rad)
+	cx.lineTo(.5, round(h / 2) - .5)
+	cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == e ? 'hover' : null)
+	cx.stroke()
+}
+
+comp.window.draw_plan = function(cx, e, w, h, hs) {
+	cx.beginPath()
+	cx.rect(.5, -4 +.5, w, h + 4)
+	cx.moveTo(    .5, round(h * 2 / 3) - .5)
+	cx.lineTo(w - .5, round(h * 2 / 3) - .5)
+	cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == e ? 'hover' : null)
+	cx.stroke()
+}
+
+comp.door.draw_face = function(cx, e, w, h, hs) {
+	cx.beginPath()
+	cx.rect(.5, .5, w, h)
+	cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == e ? 'hover' : null)
+	cx.stroke()
+}
+
+comp.window.draw_face = function(cx, e, w, h, hs) {
+	cx.beginPath()
+	cx.rect(.5, .5, w, h)
+	cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == e ? 'hover' : null)
+	cx.stroke()
+}
+
+// plan view widget ----------------------------------------------------------
 
 function overlap_segs(_a1, _a2, _b1, _b2) {
 	let a1 = min(_a1, _a2)
@@ -419,7 +455,9 @@ function draw_wall_openings(cx, scale, wr, hs) {
 		i++
 		if (wall.openings) {
 			for (let op of wall.openings) {
-				let [x, y, w, h, rotation] = comp.opening.plan_rect(op, wr, i)
+
+				let op_class = comp[op.type]
+				let [x, y, w, h, rotation] = op_class.plan_rect(op, wr, i)
 
 				x = pix(x, scale)
 				y = pix(y, scale)
@@ -435,18 +473,7 @@ function draw_wall_openings(cx, scale, wr, hs) {
 				cx.fillStyle = ui.bg_color('bg')
 				cx.fill()
 
-				if (op.type == 'window') {
-					cx.beginPath()
-					cx.rect(.5, -4 +.5, w, h + 4)
-					cx.moveTo(    .5, round(h * 2 / 3) - .5)
-					cx.lineTo(w - .5, round(h * 2 / 3) - .5)
-				} else if (op.type == 'door') {
-					cx.beginPath()
-					cx.arc(.5, round(h / 2) + .5, max(0, w - .5), 0, (op.swing ?? 90) * rad)
-					cx.lineTo(.5, round(h / 2) - .5)
-				}
-				cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
-				cx.stroke()
+				op_class.draw_plan(cx, op, w, h, hs)
 
 				cx.restore()
 			}
@@ -454,18 +481,20 @@ function draw_wall_openings(cx, scale, wr, hs) {
 	}
 }
 
-function hit_opening(wr, x00, y00, id) {
+function hit_opening(wr, id) {
 	let i = -1
 	for (let wall of wr.walls) {
 		i++
 		if (!wall.openings)
 			continue
 		for (let op of wall.openings) {
-			let [x, y, w, h, rotation] = comp.opening.plan_rect(op, wr, i)
+
+			let op_class = comp[op.type]
+			let [x, y, w, h, rotation] = op_class.plan_rect(op, wr, i)
 
 			let cx = ui.cx
 			cx.save()
-			cx.translate(x00 + x, y00 + y)
+			cx.translate(x, y)
 			cx.rotate(rotation)
 			ui.update_mouse()
 			let hit = ui.hit_rect(- 5, - 5, w + 10, h + 10)
@@ -481,12 +510,12 @@ function hit_opening(wr, x00, y00, id) {
 	}
 }
 
-function hit_walls(wr, x00, y00, id) {
+function hit_walls(wr, id) {
 	for (let i = 0, n = wr.walls.length; i < n; i++) {
-		let x  = x00 + wall_x1(wr, i)
-		let y  = y00 + wall_y1(wr, i)
-		let x2 = x00 + wall_x2(wr, i)
-		let y2 = y00 + wall_y2(wr, i)
+		let x  = wall_x1(wr, i)
+		let y  = wall_y1(wr, i)
+		let x2 = wall_x2(wr, i)
+		let y2 = wall_y2(wr, i)
 		let h = y2 == y
 		if (
 			(!h && abs(ui.mx - x) < 5 && ui.my >= min(y, y2) && ui.my <= max(y, y2)) ||
@@ -542,8 +571,6 @@ function plan_scale(plan, w, h) {
 		pix(bb_y1, scale)
 	]
 }
-
-// plan view widget ----------------------------------------------------------
 
 let PLAN_VIEW_ID     = ui.S-1
 let PLAN_VIEW_PLAN   = ui.S+0
@@ -636,7 +663,7 @@ ui.box_widget('plan_view', {
 		cx.save()
 
 		cx.translate(x00, y00)
-		cx.translate(plan_x, plan_y)
+		cx.translate(-plan_x, -plan_y)
 
 		// draw walls
 		for (let wr of plan.wall_runs) {
@@ -681,20 +708,19 @@ ui.box_widget('plan_view', {
 
 			cx.save()
 			cx.translate(x00, y00)
-			cx.translate(plan_x, plan_y)
+			cx.translate(-plan_x, -plan_y)
 			cx.scale(scale, scale)
-
 			ui.update_mouse()
 
 			;(function() {
 				for (let wr of plan.wall_runs)
 					if ((wr.storey ?? 1) == storey)
-						if (hit_opening(wr, x00, y00, id))
+						if (hit_opening(wr, id))
 							return
 
 				for (let wr of plan.wall_runs)
 					if ((wr.storey ?? 1) == storey)
-						if (hit_walls(wr, x00, y00, id))
+						if (hit_walls(wr, id))
 							return
 			})()
 
@@ -860,7 +886,9 @@ ui.box_widget('face_view', {
 				if (ops) {
 					for (let op of ops) {
 
-						let [x, y, w, h] = comp.opening.face_rect(op, wr, i, storey)
+						let op_class = comp[op.type]
+
+						let [x, y, w, h] = op_class.face_rect(op, wr, i, storey)
 
 						cx.save()
 						cx.translate(x, y)
@@ -870,15 +898,7 @@ ui.box_widget('face_view', {
 						cx.fillStyle = ui.bg_color('bg')
 						cx.fill()
 
-						if (op.type == 'window') {
-							cx.beginPath()
-							cx.rect(.5, .5, w, h)
-						} else if (op.type == 'door') {
-							cx.beginPath()
-							cx.rect(.5, .5, w, h)
-						}
-						cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
-						cx.stroke()
+						op_class.draw_face(cx, op, w, h, hs)
 
 						cx.restore()
 					}
