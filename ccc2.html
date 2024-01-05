@@ -43,22 +43,35 @@ let EPSILON = 1e-5
 
 function near(a, b) { return abs(a - b) < EPSILON }
 
+function pix(x, scale) {
+	return (scale ?? 1) == 1 ? x : round(x * scale)
+}
+
 function wall_vert(wr, i) { return ((wr.vertical ? 1 : 0) + i) & 1 }
 
+// get/set wall coordinates in wall's own space.
 // capital X means wall's main axis, Y means cross axis.
 // for horizontal walls X is x and Y is y, for vertical walls X is y and Y is x.
-function wall_X1(wr, i) { return wr.walls[mod(i-2, wr.walls.length)].to }
-function wall_X2(wr, i) { return wr.walls[mod(i-0, wr.walls.length)].to }
-function wall_Y (wr, i) { return wr.walls[mod(i-1, wr.walls.length)].to }
 
-function wall_set_X1(wr, i, v) { wr.walls[mod(i-2, wr.walls.length)].to = v }
-function wall_set_X2(wr, i, v) { wr.walls[mod(i-0, wr.walls.length)].to = v }
-function wall_set_Y (wr, i, v) { wr.walls[mod(i-1, wr.walls.length)].to = v }
+function wall_X1 (wr, i) { return wr.walls[mod(i-2, wr.walls.length)].to }
+function wall_X2 (wr, i) { return wr.walls[mod(i-0, wr.walls.length)].to }
+function wall_Y  (wr, i) { return wr.walls[mod(i-1, wr.walls.length)].to }
+
+function wall_set_X1 (wr, i, v) { wr.walls[mod(i-2, wr.walls.length)].to = v }
+function wall_set_X2 (wr, i, v) { wr.walls[mod(i-0, wr.walls.length)].to = v }
+function wall_set_Y  (wr, i, v) { wr.walls[mod(i-1, wr.walls.length)].to = v }
+
+// get/set wall coordinates in plan space.
 
 function wall_x1(wr, i) { return wr.walls[mod(i-2+wall_vert(wr, i), wr.walls.length)].to }
 function wall_y1(wr, i) { return wr.walls[mod(i-1-wall_vert(wr, i), wr.walls.length)].to }
 function wall_x2(wr, i) { return wr.walls[mod(i-0-wall_vert(wr, i), wr.walls.length)].to }
 function wall_y2(wr, i) { return wr.walls[mod(i-1+wall_vert(wr, i), wr.walls.length)].to }
+
+function set_wall_x1(wr, i, v) { wr.walls[mod(i-2+wall_vert(wr, i), wr.walls.length)].to = v }
+function set_wall_y1(wr, i, v) { wr.walls[mod(i-1-wall_vert(wr, i), wr.walls.length)].to = v }
+function set_wall_x2(wr, i, v) { wr.walls[mod(i-0-wall_vert(wr, i), wr.walls.length)].to = v }
+function set_wall_y2(wr, i, v) { wr.walls[mod(i-1+wall_vert(wr, i), wr.walls.length)].to = v }
 
 // wall's main axis unit vector: positive when pointing to right and down.
 function wall_sign(wr, i) {
@@ -77,13 +90,13 @@ function wall_offset_sign(wr, i) {
 	return v ? s : -s
 }
 
-// wall's starting point as (x, y).
+// wall's starting point in plan space as (x, y).
 // oY is the offset on the wall's cross axis (true = thickness).
 // oX is the offset on the wall's main axis (optional).
-function wall_p1(wr, i, oY, oX) {
+function wall_p1(wr, i, oY, oX, scale) {
 	let p = [
-		wall_x1(wr, i),
-		wall_y1(wr, i)
+		pix(wall_x1(wr, i), scale),
+		pix(wall_y1(wr, i), scale)
 	]
 	if (!(oY || oX))
 		return p
@@ -92,7 +105,7 @@ function wall_p1(wr, i, oY, oX) {
 	let v1 = wall_vert(wr, i)
 	let s1 = wall_sign(wr, i)
 	let s0 = wall_sign(wr, i-1)
-	if (oX === undefined) {
+	if (oX == null) {
 		oX = oY
 		if (!wr.closed) {
 			let n = wr.walls.length
@@ -112,20 +125,11 @@ function wall_p1(wr, i, oY, oX) {
 		sx = (s1 < s0) == v1 ? -1 : 1
 		sy = sx
 	}
-	let ox = v1 ? oY : oX
-	let oy = v1 ? oX : oY
-	p[0] += sx * ox
-	p[1] += sy * oy
+	let ox = sx * (v1 ? oY : oX)
+	let oy = sy * (v1 ? oX : oY)
+	p[0] += pix(ox, scale)
+	p[1] += pix(oy, scale)
 	return p
-}
-
-function wall_line_XY(wr, i, oY, oX) {
-	let [x1, y1] = wall_p1(wr, i+0, oY, oX)
-	let [x2, y2] = wall_p1(wr, i+1, oY, oX)
-	if (wall_vert(wr, i))
-		return [y1, y2, x1]
-	else
-		return [x1, x2, y1]
 }
 
 function wall_end_XY(wr, first, oY, oX) {
@@ -136,14 +140,6 @@ function wall_end_XY(wr, first, oY, oX) {
 		return [y, x]
 	else
 		return [x, y]
-}
-
-function overlap_segs(_a1, _a2, _b1, _b2) {
-	let a1 = min(_a1, _a2)
-	let a2 = max(_a1, _a2)
-	let b1 = min(_b1, _b2)
-	let b2 = max(_b1, _b2)
-	return !(a2 <= b1 || b2 <= a1)
 }
 
 // points are in polygon order, but lines are in offset sign order i.e. first
@@ -159,12 +155,14 @@ function wall_lines(wr, i, o) {
 		return [p1, p2, op1, op2]
 }
 
-function wall_rect(wr, i, o) { // returns (x1, y1, x2, y2), not (x, y, w, h)
+// wall's bounding rectangle to ose as solid obstacle to constrian movement.
+// returns (x1, y1, x2, y2), not (x, y, w, h)!
+function wall_rect(wr, i, o) {
 	let p1  = wall_p1(wr, i+0)
 	let p2  = wall_p1(wr, i+1)
 	let op1 = wall_p1(wr, i+0, o ?? true)
 	let op2 = wall_p1(wr, i+1, o ?? true)
-	let v   = wall_vert (wr, i)
+	let v   = wall_vert(wr, i)
 	let X = v ? 1 : 0
 	let Y = v ? 0 : 1
 	let r = [0, 0, 0, 0]
@@ -180,33 +178,59 @@ function wall_joints(plan, wr, i) {
 	let os = wall_offset_sign (wr, i)
 	let joints = []
 	for (let bwr of plan.wall_runs) {
-		if (bwr.closed) // has no free ends
+
+		if (bwr.closed) // closed walls don't have free ends
 			continue
+
 		// test for butt-joints
 		let ba = bwr.walls
 		for (let first = -1; first <= 0; first++) { // test both wall-run ends
 			let bi = first ? 0 : ba.length-3 // index of first or last wall-run end
 			let bv = wall_vert(bwr, bi)
 			if (bv != v) { // _|_
+
 				let [bmpX, bmpY] = wall_end_XY(bwr, first)
 				let [bopX, bopY] = wall_end_XY(bwr, first, true)
 				let bs = wall_sign(bwr, bi)
+
 				// the first wall-run-end butt-joints to the wall's main edge
 				// if it goes opposite to the wall's offset normal, and it
 				// butt-joints to the wall's offset edge if it goes in the same
 				// direction as the wall's offset normal. And it's the opposite
 				// for the last wall-run-end.
-				let butt_to_main_edge = first ? bs == -os : bs == os
-				let [pX1, pX2, pY] = wall_line_XY(wr, i, !butt_to_main_edge)
+				let butt_to_offset_edge = bs == os * (first ? 1 : -1)
+
+				// compute butted line's coords in its own space.
+				let pX1, pX2, pY
+				function update_butted_line() {
+					let [x1, y1] = wall_p1(wr, i+0, butt_to_offset_edge)
+					let [x2, y2] = wall_p1(wr, i+1, butt_to_offset_edge)
+					if (wall_vert(wr, i)) {
+						pX1 = min(y1, y2)
+						pX2 = max(y1, y2)
+						pY  = x1
+					} else {
+						pX1 = min(x1, x2)
+						pX2 = max(x1, x2)
+						pY  = y1
+					}
+				}
+				update_butted_line()
+
 				if (near(bmpX, pY)) { // butt-end's main axis == butted-edge's cross axis
 					let bY1 = min(bmpY, bopY)
 					let bY2 = max(bmpY, bopY)
 					if (bY1 >= pX1 && bY2 <= pX2) { // butt-end is fully in front of butted-edge
 						joints.push({
-							type: 'butt',
-							wall_run: bwr,
-							wall: i,
-							to_main_edge: butt_to_main_edge,
+							wr: bwr,
+							i: bi,
+							update: function() {
+								update_butted_line()
+								if (first)
+									wall_set_X1(bwr, bi, pY)
+								else
+									wall_set_X2(bwr, bi, pY)
+							},
 						})
 					}
 				}
@@ -220,6 +244,8 @@ function aligned_walls(plan, wr, i) {
 	//
 }
 
+// END WALLS MODEL -----------------------------------------------------------
+
 let comp = {}
 
 comp.opening = {}
@@ -228,25 +254,29 @@ comp.opening.plan_rect = function(e, wr, i) {
 	let t = wr.thickness ?? 5
 	let r = [e.sx, e.sy || 0, e.w, t, 0]
 	if (i != null) {
-		let p1   = wall_p1          (wr, i)
-		let vert = wall_vert        (wr, i)
-		let dir  = wall_sign        (wr, i)
-		let odir = wall_offset_sign (wr, i)
+		let p1    = wall_p1          (wr, i)
+		let vert  = wall_vert        (wr, i)
+		let sign  = wall_sign        (wr, i)
+		let osign = wall_offset_sign (wr, i)
 		let X = vert ? 1 : 0
 		let Y = vert ? 0 : 1
-		r[X] = p1[X] + (dir > 0 ? e.d : -(e.d + e.w))
-		r[Y] = p1[Y] + (odir > 0 ? 0 : -t)
+		r[X] = p1[X] + (sign > 0 ? e.d : -(e.d + e.w))
+		r[Y] = p1[Y] + (osign > 0 ? 0 : -t)
 		if (vert) {
 			r[4] = 90 * rad
 			r[0] += t
+		}
+		// TODO: !!!
+		if (osign == -1) {
+			r[4] += 180 * rad
 		}
 	}
 	return r
 }
 
-comp.opening.face_rect = function(e, wr, i) {
+comp.opening.face_rect = function(e, wr, i, storey) {
 	let t = wr.thickness
-	let r = [e.x, wr.h - e.h - (e.y || 0), e.w, e.h]
+	let r = [e.x, storey.h - e.h - (e.y || 0), e.w, e.h]
 	if (i != null) {
 		let p1   = wall_p1          (wr, i)
 		let vert = wall_vert        (wr, i)
@@ -259,7 +289,15 @@ comp.opening.face_rect = function(e, wr, i) {
 	return r
 }
 
-function moving_ranges(plan, wr, ti1) {
+function overlap_segs(_a1, _a2, _b1, _b2) {
+	let a1 = min(_a1, _a2)
+	let a2 = max(_a1, _a2)
+	let b1 = min(_b1, _b2)
+	let b2 = max(_b1, _b2)
+	return !(a2 <= b1 || b2 <= a1)
+}
+
+function moving_ranges(plan, wr, ti1, joints) {
 	let a = wr.walls
 	let n = a.length
 	let ti0 = mod(ti1-1, n)
@@ -278,8 +316,22 @@ function moving_ranges(plan, wr, ti1) {
 		let n = a.length
 		let o = wr1.thickness
 		for (let i1 = 0; i1 < n; i1++) {
+
+			// exclude self and connected walls which move along.
 			if (wr1 == wr && (i1 == ti1 || i1 == ti0 || i1 == ti2))
 				continue
+
+			// exclude jointed walls which move along.
+			let continue2
+			for (let joint of joints) {
+				if (wr1 == joint.wr && i1 == joint.i) {
+					continue2 = 1
+					break
+				}
+			}
+			if (continue2)
+				continue
+
 			let r = wall_rect(wr1, i1)
 
 			if (r[Y+2] <= tl[0][Y]) // rect bottom side < top of the wall
@@ -303,7 +355,7 @@ function moving_ranges(plan, wr, ti1) {
 	return [rangeY]
 }
 
-function begin_closed_wall_path(cx, wr, o) {
+function begin_closed_wall_path(cx, scale, wr, o) {
 
 	let n = wr.walls.length
 
@@ -311,7 +363,7 @@ function begin_closed_wall_path(cx, wr, o) {
 
 	// draw offset path clockwise.
 	for (let i = 0; i < n; i++) {
-		let [x, y] = wall_p1(wr, i, o ?? true)
+		let [x, y] = wall_p1(wr, i, o ?? true, null, scale)
 		if (i == 0)
 			cx.moveTo(x, y)
 		else
@@ -321,8 +373,7 @@ function begin_closed_wall_path(cx, wr, o) {
 
 	// draw main (inner) path counterclockwise.
 	for (let i = n-1; i >= 0; i--) {
-		let x = wall_x1(wr, i)
-		let y = wall_y1(wr, i)
+		let [x, y] = wall_p1(wr, i, null, null, scale)
 		if (i == n-1)
 			cx.moveTo(x, y)
 		else
@@ -331,7 +382,7 @@ function begin_closed_wall_path(cx, wr, o) {
 	cx.closePath()
 }
 
-function begin_open_wall_path(cx, wr, o) {
+function begin_open_wall_path(cx, scale, wr, o) {
 
 	let n = wr.walls.length-1
 
@@ -339,7 +390,7 @@ function begin_open_wall_path(cx, wr, o) {
 
 	// draw non-offset path.
 	for (let i = 0; i < n; i++) {
-		let [x, y] = wall_p1(wr, i)
+		let [x, y] = wall_p1(wr, i, null, null, scale)
 		if (i == 0)
 			cx.moveTo(x, y)
 		else
@@ -348,27 +399,32 @@ function begin_open_wall_path(cx, wr, o) {
 
 	// draw offset path in reverse.
 	for (let i = n-1; i >= 0; i--) {
-		let [x, y] = wall_p1(wr, i, o ?? true)
+		let [x, y] = wall_p1(wr, i, o ?? true, null, scale)
 		cx.lineTo(x, y)
 	}
 
 	cx.closePath()
 }
 
-function begin_wall_path(cx, wr, o) {
+function begin_wall_path(cx, scale, wr, o) {
 	if (wr.closed)
-		begin_closed_wall_path(cx, wr, o)
+		begin_closed_wall_path(cx, scale, wr, o)
 	else
-		begin_open_wall_path(cx, wr, o)
+		begin_open_wall_path(cx, scale, wr, o)
 }
 
-function draw_wall_openings(cx, wr, hs) {
+function draw_wall_openings(cx, scale, wr, hs) {
 	let i = -1
 	for (let wall of wr.walls) {
 		i++
 		if (wall.openings) {
 			for (let op of wall.openings) {
 				let [x, y, w, h, rotation] = comp.opening.plan_rect(op, wr, i)
+
+				x = pix(x, scale)
+				y = pix(y, scale)
+				w = pix(w, scale)
+				h = pix(h, scale)
 
 				cx.save()
 				cx.translate(x, y)
@@ -381,12 +437,12 @@ function draw_wall_openings(cx, wr, hs) {
 
 				if (op.type == 'window') {
 					cx.beginPath()
-					cx.rect(.5, .5 - 4.5, w, h + 4.5)
-					cx.moveTo(    .5, round(h / 3) - .5)
-					cx.lineTo(w - .5, round(h / 3) - .5)
+					cx.rect(.5, -4 +.5, w, h + 4)
+					cx.moveTo(    .5, round(h * 2 / 3) - .5)
+					cx.lineTo(w - .5, round(h * 2 / 3) - .5)
 				} else if (op.type == 'door') {
 					cx.beginPath()
-					cx.arc(.5, round(h / 2) + .5, w - .5, 0, (op.swing ?? 90) * rad)
+					cx.arc(.5, round(h / 2) + .5, max(0, w - .5), 0, (op.swing ?? 90) * rad)
 					cx.lineTo(.5, round(h / 2) - .5)
 				}
 				cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
@@ -396,104 +452,6 @@ function draw_wall_openings(cx, wr, hs) {
 			}
 		}
 	}
-}
-
-function draw_walls(cx, plan, storey, hs) {
-
-	// draw walls
-	for (let wr of plan.wall_runs) {
-		if ((wr.storey ?? 1) != (storey ?? 1))
-			continue
-
-		begin_wall_path(cx, wr)
-
-		//cx.lineWidth = 1
-		// cx.strokeStyle = ui.fg_color('text')
-		// cx.stroke()
-		cx.fillStyle = ui.bg_color('bg3')
-		cx.fill()
-
-		draw_wall_openings(cx, wr, hs)
-
-	}
-}
-
-function draw_facade(cx, plan, vert, sign, hs) {
-
-	// sort walls by depth.
-	let walls = []
-	for (let wr of plan.wall_runs) {
-		if (!wr.exterior)
-			continue
-		for (let i = 0, n = wr.walls.length; i < n; i++) {
-			if (wall_vert(wr, i) != vert)
-				continue
-			if (wall_sign(wr, i) != sign)
-				continue
-			walls.push([wr, i])
-		}
-	}
-	walls.sort(function(e1, e2) {
-		let y1 = wall_Y(e1[0], e1[1])
-		let y2 = wall_Y(e2[0], e2[1])
-		return y1 < y2 ? sign : y1 > y2 ? -sign : 0
-	})
-
-	// draw walls (offset face) in depth order.
-	let X = vert ? 1 : 0
-	let Y = vert ? 0 : 1
-	for (let [wr, i] of walls) {
-		let p1 = wall_p1(wr, i+0, true)
-		let p2 = wall_p1(wr, i+1, true)
-		let x1 = p1[X]
-		let x2 = p2[X]
-		let x = min(x1, x2)
-		let w = max(x1, x2) - x
-		let y = p1[Y]
-		let h = wr.h
-
-		cx.beginPath()
-		cx.rect(x, 0, w, h)
-		cx.fillStyle = ui.hsl_adjust(ui.bg_color_hsl('bg3'), 1, 1, p1[Y] / 500)
-		cx.fill()
-
-		cx.beginPath()
-		cx.rect(x + .5, .5, w, h)
-		cx.strokeStyle = ui.fg_color('text')
-		cx.stroke()
-
-		// draw openings.
-		let wall = wr.walls[i]
-		let ops = wall.openings
-		if (ops) {
-			for (let op of ops) {
-
-				let [x, y, w, h] = comp.opening.face_rect(op, wr, i)
-
-				cx.save()
-				cx.translate(x, y)
-
-				cx.beginPath()
-				cx.rect(0, 0, w, h)
-				cx.fillStyle = ui.bg_color('bg')
-				cx.fill()
-
-				if (op.type == 'window') {
-					cx.beginPath()
-					cx.rect(.5, .5, w, h)
-				} else if (op.type == 'door') {
-					cx.beginPath()
-					cx.rect(.5, .5, w, h)
-				}
-				cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
-				cx.stroke()
-
-				cx.restore()
-			}
-		}
-
-	}
-
 }
 
 function hit_opening(wr, x00, y00, id) {
@@ -543,12 +501,57 @@ function hit_walls(wr, x00, y00, id) {
 	}
 }
 
-let PLAN_ID     = ui.S-1
-let PLAN_STRUCT = ui.S+0
+function plan_bb(plan, storey) {
+	let bb_x1 =  1/0
+	let bb_x2 = -1/0
+	let bb_y1 =  1/0
+	let bb_y2 = -1/0
+	for (let wr of plan.wall_runs) {
+		if (!wr.exterior)
+			continue
+		for (let i = 0, n = wr.walls.length; i < n; i++) {
+			let x1 = wall_x1(wr, i)
+			let x2 = wall_x2(wr, i)
+			let y1 = wall_y1(wr, i)
+			let y2 = wall_y2(wr, i)
+			bb_x1 = min(bb_x1, x1, x2)
+			bb_x2 = max(bb_x2, x1, x2)
+			bb_y1 = min(bb_y1, y1, y2)
+			bb_y2 = max(bb_y1, y1, y2)
+		}
+		let t = wr.thickness * (wr.offset_sign ?? 1)
+		bb_x1 -= t
+		bb_x2 += t
+		bb_y1 -= t
+		bb_y2 += t
+	}
+	return [bb_x1, bb_y1, bb_x2, bb_y2]
+}
 
-ui.box_widget('plan', {
+function plan_scale(plan, w, h) {
+	let [bb_x1, bb_y1, bb_x2, bb_y2] = plan_bb(plan)
+	let bb_w = bb_x2 - bb_x1
+	let bb_h = bb_y2 - bb_y1
+	let scale = min(
+		w / bb_w,
+		h / bb_h
+	)
+	return [
+		scale,
+		pix(bb_x1, scale),
+		pix(bb_y1, scale)
+	]
+}
 
-	create: function(cmd, id, fr, align, valign, min_w, min_h, plan) {
+// plan view widget ----------------------------------------------------------
+
+let PLAN_VIEW_ID     = ui.S-1
+let PLAN_VIEW_PLAN   = ui.S+0
+let PLAN_VIEW_STOREY = ui.S+1
+
+ui.box_widget('plan_view', {
+
+	create: function(cmd, id, plan, storey, fr, align, valign, min_w, min_h) {
 
 		let [dstate, dx, dy] = ui.drag(id)
 
@@ -571,13 +574,13 @@ ui.box_widget('plan', {
 				let wr = hs.get('wall_run')
 				let pi = hs.get('pi')
 				ui.set_cursor(cursors[side])
-				cs.set('side', side)
-				cs.set('pi'  , pi)
-				cs.set('px0' , wall_x1(wr, pi))
-				cs.set('py0' , wall_y1(wr, pi))
-				cs.set('rs'  , moving_ranges(plan, wr, pi))
-				cs.set('joints', wall_joints(plan, wr, pi))
-				pr(cs.get('joints'))
+				let joints = wall_joints(plan, wr, pi)
+				cs.set('side'  , side)
+				cs.set('pi'    , pi)
+				cs.set('px0'   , wall_x1(wr, pi))
+				cs.set('py0'   , wall_y1(wr, pi))
+				cs.set('joints', joints)
+				cs.set('rs'    , moving_ranges(plan, wr, pi, joints))
 			}
 			let opening = hs.get('opening')
 			if (opening) {
@@ -597,8 +600,11 @@ ui.box_widget('plan', {
 				let pX = cs.get(X ? 'py0' : 'px0') + dX
 				let r = rs[0]
 				pX = clamp(pX, r[0], r[1])
-				//TODO: move_jointed_walls(plan, wr, pi, dX)
+
 				wall_set_Y(wr, pi, pX)
+
+				for (let joint of joints)
+					joint.update()
 			}
 			let opening = cs.get('opening')
 			if (opening) {
@@ -607,7 +613,171 @@ ui.box_widget('plan', {
 		}
 
 		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
-				id, plan
+				id, plan, storey,
+			)
+	},
+
+	draw: function(a, i) {
+
+		let x00    = a[i+0]
+		let y00    = a[i+1]
+		let w      = a[i+2]
+		let h      = a[i+3]
+		let id     = a[i+PLAN_VIEW_ID]
+		let plan   = a[i+PLAN_VIEW_PLAN]
+		let storey = a[i+PLAN_VIEW_STOREY]
+
+		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+
+		let hs = ui.hit(id)
+
+		let cx = ui.cx
+
+		cx.save()
+
+		cx.translate(x00, y00)
+		cx.translate(plan_x, plan_y)
+
+		// draw walls
+		for (let wr of plan.wall_runs) {
+
+			if ((wr.storey ?? 1) != (storey ?? 1))
+				continue
+
+			begin_wall_path(cx, scale, wr)
+
+			//cx.lineWidth = 1
+			// cx.strokeStyle = ui.fg_color('text')
+			// cx.stroke()
+			cx.fillStyle = ui.bg_color('bg3')
+			cx.fill()
+
+			draw_wall_openings(cx, scale, wr, hs)
+
+		}
+
+		cx.restore()
+
+	},
+
+	hit: function(a, i) {
+
+		let x00    = a[i+0]
+		let y00    = a[i+1]
+		let w      = a[i+2]
+		let h      = a[i+3]
+		let id     = a[i+PLAN_VIEW_ID]
+		let plan   = a[i+PLAN_VIEW_PLAN]
+		let storey = a[i+PLAN_VIEW_STOREY]
+
+		let hs = ui.hovers(id)
+		let cs = ui.captured(id)
+
+		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+
+		if (!cs) {
+
+			let cx = ui.cx
+
+			cx.save()
+			cx.translate(x00, y00)
+			cx.translate(plan_x, plan_y)
+			cx.scale(scale, scale)
+
+			ui.update_mouse()
+
+			;(function() {
+				for (let wr of plan.wall_runs)
+					if ((wr.storey ?? 1) == storey)
+						if (hit_opening(wr, x00, y00, id))
+							return
+
+				for (let wr of plan.wall_runs)
+					if ((wr.storey ?? 1) == storey)
+						if (hit_walls(wr, x00, y00, id))
+							return
+			})()
+
+			cx.restore()
+			ui.update_mouse()
+
+		}
+
+	},
+
+})
+
+// face view widget ----------------------------------------------------------
+
+let FACE_VIEW_ID   = ui.S-1
+let FACE_VIEW_PLAN = ui.S+0
+let FACE_VIEW_FACE = ui.S+1
+
+ui.box_widget('face_view', {
+
+	create: function(cmd, id, plan, face, fr, align, valign, min_w, min_h) {
+
+		let [dstate, dx, dy] = ui.drag(id)
+
+		let hs = ui.hovers(id)
+		let cs = ui.captured(id)
+		let cursors = {x: 'ew-resize', y: 'ns-resize'}
+
+		if (dstate == 'hover') {
+			let side = hs.get('side')
+			if (side)
+				ui.set_cursor(cursors[side])
+			let opening = hs.get('opening')
+			if (opening) {
+				ui.set_cursor('move')
+			}
+		}
+		if (dstate == 'drag') {
+			let side = hs.get('side')
+			if (side) {
+				let wr = hs.get('wall_run')
+				let pi = hs.get('pi')
+				ui.set_cursor(cursors[side])
+				let joints = wall_joints(plan, wr, pi)
+				cs.set('side'  , side)
+				cs.set('pi'    , pi)
+				cs.set('px0'   , wall_x1(wr, pi))
+				cs.set('py0'   , wall_y1(wr, pi))
+				cs.set('joints', joints)
+				cs.set('rs'    , moving_ranges(plan, wr, pi, joints))
+			}
+			let opening = hs.get('opening')
+			if (opening) {
+				cs.set('opening', opening)
+			}
+		}
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+			let side = cs.get('side')
+			if (side) {
+				let wr = cs.get('wall_run')
+				let pi = cs.get('pi')
+				let rs = cs.get('rs')
+				let joints = cs.get('joints')
+				ui.set_cursor(cursors[side])
+				let X = side == 'x' ? 0 : 1
+				let dX = X ? dy : dx
+				let pX = cs.get(X ? 'py0' : 'px0') + dX
+				let r = rs[0]
+				pX = clamp(pX, r[0], r[1])
+
+				wall_set_Y(wr, pi, pX)
+
+				for (let joint of joints)
+					joint.update()
+			}
+			let opening = cs.get('opening')
+			if (opening) {
+				//
+			}
+		}
+
+		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
+				id, plan, face
 			)
 	},
 
@@ -617,8 +787,12 @@ ui.box_widget('plan', {
 		let y00  = a[i+1]
 		let w    = a[i+2]
 		let h    = a[i+3]
-		let id   = a[i+PLAN_ID]
-		let plan = a[i+PLAN_STRUCT]
+		let id   = a[i+FACE_VIEW_ID]
+		let plan = a[i+FACE_VIEW_PLAN]
+		let face = a[i+FACE_VIEW_FACE]
+
+		let face_vert = (face-1) & 1
+		let face_sign = face <= 2 ? 1 : -1
 
 		let hs = ui.hit(id)
 
@@ -626,30 +800,97 @@ ui.box_widget('plan', {
 
 		cx.beginPath()
 
+		cx.save()
+
 		cx.translate(x00, y00)
 
-		draw_walls(cx, plan, 1, hs)
-		cx.translate( 300, 0)
-		draw_walls(cx, plan, 2, hs)
-		cx.translate(-300, 0)
+		// sort walls by depth.
+		let walls = []
+		for (let wr of plan.wall_runs) {
+			if (!wr.exterior)
+				continue
+			for (let i = 0, n = wr.walls.length; i < n; i++) {
+				if (wall_vert(wr, i) != face_vert)
+					continue
+				if (wall_sign(wr, i) != face_sign)
+					continue
+				walls.push([wr, i])
+			}
+		}
+		walls.sort(function(e1, e2) {
+			let y1 = wall_Y(e1[0], e1[1])
+			let y2 = wall_Y(e2[0], e2[1])
+			return y1 < y2 ? face_sign : y1 > y2 ? -face_sign : 0
+		})
 
-		cx.translate(0,  500)
-		draw_facade(cx, plan, 0, -1, hs)
-		cx.translate(0, -500)
+		let storey_num = 0
+		for (let storey of plan.storeys) {
+			storey_num++
 
-		cx.translate(0,  600)
-		draw_facade(cx, plan, 0, 1, hs)
-		cx.translate(0, -600)
+			// draw walls (offset face) in depth order.
+			let X = face_vert ? 1 : 0
+			let Y = face_vert ? 0 : 1
+			for (let [wr, i] of walls) {
 
-		cx.translate( 600, 0)
-		draw_facade(cx, plan, 1, 1, hs)
-		cx.translate(-600, 0)
+				if ((wr.storey ?? 1) != storey_num)
+					continue
 
-		cx.translate( 600,  100)
-		draw_facade(cx, plan, 1, -1, hs)
-		cx.translate(-600, -100)
+				let p1 = wall_p1(wr, i+0, true)
+				let p2 = wall_p1(wr, i+1, true)
+				let x1 = p1[X]
+				let x2 = p2[X]
+				let x = min(x1, x2)
+				let w = max(x1, x2) - x
+				let y = p1[Y]
+				let h = storey.h
 
-		cx.translate(-x00, -y00)
+				cx.beginPath()
+				cx.rect(x, 0, w, h)
+				cx.fillStyle = ui.hsl_adjust(ui.bg_color_hsl('bg3'), 1, 1, p1[Y] / 500)
+				cx.fill()
+
+				cx.beginPath()
+				cx.rect(x + .5, .5, w, h)
+				cx.strokeStyle = ui.fg_color('text')
+				cx.stroke()
+
+				// draw openings.
+				let wall = wr.walls[i]
+				let ops = wall.openings
+				if (ops) {
+					for (let op of ops) {
+
+						let [x, y, w, h] = comp.opening.face_rect(op, wr, i, storey)
+
+						cx.save()
+						cx.translate(x, y)
+
+						cx.beginPath()
+						cx.rect(0, 0, w, h)
+						cx.fillStyle = ui.bg_color('bg')
+						cx.fill()
+
+						if (op.type == 'window') {
+							cx.beginPath()
+							cx.rect(.5, .5, w, h)
+						} else if (op.type == 'door') {
+							cx.beginPath()
+							cx.rect(.5, .5, w, h)
+						}
+						cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == op ? 'hover' : null)
+						cx.stroke()
+
+						cx.restore()
+					}
+				}
+
+			}
+
+			cx.translate(0, -storey.h)
+
+		}
+
+		cx.restore()
 
 	},
 
@@ -659,14 +900,19 @@ ui.box_widget('plan', {
 		let y00  = a[i+1]
 		let w    = a[i+2]
 		let h    = a[i+3]
-		let id   = a[i+PLAN_ID]
-		let plan = a[i+PLAN_STRUCT]
+		let id   = a[i+FACE_VIEW_ID]
+		let plan = a[i+FACE_VIEW_PLAN]
+		let face = a[i+FACE_VIEW_FACE]
+
+		let face_vert = (face-1) & 1
+		let face_sign = face <= 2 ? 1 : -1
 
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
 
 		if (!cs) {
 
+			/*
 			for (let wr of plan.wall_runs)
 				if (hit_opening(wr, x00, y00, id))
 					return
@@ -674,6 +920,7 @@ ui.box_widget('plan', {
 			for (let wr of plan.wall_runs)
 				if (hit_walls(wr, x00, y00, id))
 					return
+			*/
 
 		}
 
@@ -682,16 +929,21 @@ ui.box_widget('plan', {
 })
 
 let plan = {
+	storeys: [
+		{h: 80},
+		{h: 80},
+	],
 	wall_runs: [
 		{
-			h: 80,
 			exterior: true,
 			closed: true,
 			thickness: 5,
 			walls: [
 				{to: 100,},
 				{to: 100,},
-				{to: 200,},
+				{to: 200, openings: [
+					{type: 'window', d: 30, w: 50, h: 50, y: 20},
+				]},
 				{to: 200,},
 				{to: 100, openings: [
 					{type: 'door', d: 20, w: 50, h: 70},
@@ -707,7 +959,6 @@ let plan = {
 		},
 		{
 			storey: 2,
-			h: 80,
 			exterior: true,
 			closed: true,
 			thickness: 5,
@@ -717,7 +968,7 @@ let plan = {
 				{to: 200,},
 				{to: 200,},
 				{to: 100, openings: [
-					{type: 'door', d: 20, w: 50, h: 70},
+					{type: 'window', d: 20, w: 50, h: 50, y: 20},
 				]},
 				{to: 300,},
 				{to: 150,},
@@ -730,7 +981,7 @@ let plan = {
 		},
 		{
 			h: 80,
-			thickness: 10,
+			thickness: 3,
 			offset_sign: 1,
 			vertical: true,
 			walls: [
@@ -748,10 +999,18 @@ let plan = {
 ui.main = function() {
 
 	ui.m(100)
-	ui.v()
-		ui.plan('p1', 1, null, null, null, null, plan)
-	ui.end_v()
-
+	ui.h()
+		ui.v()
+			ui.plan_view('pv1', plan, 1)
+			ui.plan_view('pv2', plan, 2)
+		ui.end_v()
+		ui.v()
+			ui.face_view('fv1', plan, 1)
+			ui.face_view('fv2', plan, 2)
+			ui.face_view('fv2', plan, 3)
+			ui.face_view('fv2', plan, 4)
+		ui.end_v()
+	ui.end_h()
 }
 
 </script>

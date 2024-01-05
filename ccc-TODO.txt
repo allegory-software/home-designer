@@ -1,25 +1,38 @@
 
-- FINISH: move butt-joined int. walls when moving ext. walls or int. walls
+- FINISH: fit-to-container scalable drawing & hit-testing
+	- TODO: fix plan hit-testing bugs
+	- TODO: scalable facade draw & hit-test
 
-- TODO: multiple storeys & aligned walls
+- TODO: fix opening rotation bug
 
 - TODO: constrain wall movement to multiple ranges
 	- TODO: constrian wall movement to min. length of shrinking walls.
+	- TODO: constrain wall movement to openings
 
-- TODO: constrain wall movement to openings
+- TODO: keep exterior walls aligned on the outside edge between storeys
 
-- draw facade obscuring walls with transparent color.
+- TODO: merge storey facade walls to form a continuous facade polygon.
 
-- draw facade shadow triangles
-
-- have objects draw themselves on plan and on facade
-
-- drag opening
+- drag opening:
 	- move along walls
 	- resize by each end
 	- move outside walls on the empty space
 	- auto-shrink to fit free space on the wall + padding
 	- constrain position to free space when moving and resizing
+
+- draw facade obscuring walls with transparent color.
+
+- plan: draw below stories on the outside with faded dotted color.
+
+- plan: draw ceiling contour from above stories with dotted line.
+
+- draw facade shadow triangles.
+
+- have objects draw themselves on plan and on facade.
+
+- undo / redo
+- save snapshot
+- restore snapshot == make branch
 
 - select object: opening
 	- properties popup
