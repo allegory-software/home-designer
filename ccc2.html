@@ -253,7 +253,7 @@ comp.window = {}
 
 comp.door.plan_rect = function(e, wr, i) {
 	let t = wr.thickness ?? 5
-	let r = [e.sx, e.sy || 0, e.w, t, 0]
+	let r = [e.sx || 0, e.sy || 0, e.w, t, 0]
 	if (i != null) {
 		let p1    = wall_p1          (wr, i)
 		let vert  = wall_vert        (wr, i)
@@ -261,15 +261,16 @@ comp.door.plan_rect = function(e, wr, i) {
 		let osign = wall_offset_sign (wr, i)
 		let X = vert ? 1 : 0
 		let Y = vert ? 0 : 1
-		r[X] = p1[X] + (sign > 0 ? e.d : -(e.d + e.w))
-		r[Y] = p1[Y] + (osign > 0 ? 0 : -t)
-		if (vert) {
-			r[4] = 90 * rad
-			r[0] += t
-		}
-		// TODO: !!!
-		if (osign == -1) {
-			r[4] += 180 * rad
+		r[0] = p1[0]
+		r[1] = p1[1]
+		if (!vert) {
+			r[0] += sign * e.d
+			r[1] -= sign * t
+			r[4]  = sign < 0 ? -180 * rad : 0
+		} else if (vert) {
+			r[0] += sign * t
+			r[1] += sign * e.d
+			r[4]  = sign * 90 * rad
 		}
 	}
 	return r
@@ -302,9 +303,10 @@ comp.door.draw_plan = function(cx, e, w, h, hs) {
 
 comp.window.draw_plan = function(cx, e, w, h, hs) {
 	cx.beginPath()
-	cx.rect(.5, -4 +.5, w, h + 4)
-	cx.moveTo(    .5, round(h * 2 / 3) - .5)
-	cx.lineTo(w - .5, round(h * 2 / 3) - .5)
+	let sill_offset = round(h * 1/2)
+	cx.rect(.5, .5, w, h + sill_offset)
+	cx.moveTo(    .5, -sill_offset + round(h * 1/4) - .5)
+	cx.lineTo(w - .5 - 10, -sill_offset + round(h * 1/4) - .5)
 	cx.strokeStyle = ui.fg_color('text', hs && hs.get('opening') == e ? 'hover' : null)
 	cx.stroke()
 }
@@ -355,6 +357,10 @@ function moving_ranges(plan, wr, ti1, joints) {
 
 			// exclude self and connected walls which move along.
 			if (wr1 == wr && (i1 == ti1 || i1 == ti0 || i1 == ti2))
+				continue
+
+			// exclude other storeys' walls
+			if ((wr1.storey ?? 1) != (wr.storey ?? 1)	)
 				continue
 
 			// exclude jointed walls which move along.
@@ -530,12 +536,16 @@ function hit_walls(wr, id) {
 	}
 }
 
-function plan_bb(plan, storey) {
-	let bb_x1 =  1/0
-	let bb_x2 = -1/0
-	let bb_y1 =  1/0
-	let bb_y2 = -1/0
+function plan_bb(plan) {
+	let bbx1 =  1/0
+	let bbx2 = -1/0
+	let bby1 =  1/0
+	let bby2 = -1/0
 	for (let wr of plan.wall_runs) {
+		let bx1 =  1/0
+		let bx2 = -1/0
+		let by1 =  1/0
+		let by2 = -1/0
 		if (!wr.exterior)
 			continue
 		for (let i = 0, n = wr.walls.length; i < n; i++) {
@@ -543,33 +553,58 @@ function plan_bb(plan, storey) {
 			let x2 = wall_x2(wr, i)
 			let y1 = wall_y1(wr, i)
 			let y2 = wall_y2(wr, i)
-			bb_x1 = min(bb_x1, x1, x2)
-			bb_x2 = max(bb_x2, x1, x2)
-			bb_y1 = min(bb_y1, y1, y2)
-			bb_y2 = max(bb_y1, y1, y2)
+			bx1 = min(bx1, x1, x2)
+			bx2 = max(bx2, x1, x2)
+			by1 = min(by1, y1, y2)
+			by2 = max(by1, y1, y2)
 		}
 		let t = wr.thickness * (wr.offset_sign ?? 1)
-		bb_x1 -= t
-		bb_x2 += t
-		bb_y1 -= t
-		bb_y2 += t
+		// NOTE: assuming clockwise flow!
+		bx1 -= t
+		bx2 += t
+		by1 -= t
+		by2 += t
+		bbx1 = min(bbx1, bx1, bx2)
+		bbx2 = max(bbx2, bx1, bx2)
+		bby1 = min(bby1, by1, by2)
+		bby2 = max(bby1, by1, by2)
 	}
-	return [bb_x1, bb_y1, bb_x2, bb_y2]
+	return [bbx1, bby1, bbx2, bby2]
 }
 
-function plan_scale(plan, w, h) {
-	let [bb_x1, bb_y1, bb_x2, bb_y2] = plan_bb(plan)
-	let bb_w = bb_x2 - bb_x1
-	let bb_h = bb_y2 - bb_y1
+function face_bb(plan, vert) { // returns (x1, y1, x2, y2, min_depth, max_depth)
+	let [x1, y1, x2, y2] = plan_bb(plan)
+	let h = 0
+	for (let storey of plan.storeys)
+		h += storey.h
+	if (vert)
+		return [y1, 0, y2, h, x1, x2]
+	else
+		return [x1, 0, x2, h, y1, y2]
+}
+
+function bb_scale(w, h, bb) {
+	let [x1, y1, x2, y2, d1, d2] = bb
+	let bw = x2 - x1
+	let bh = y2 - y1
 	let scale = min(
-		w / bb_w,
-		h / bb_h
+		w / bw,
+		h / bh
 	)
 	return [
 		scale,
-		pix(bb_x1, scale),
-		pix(bb_y1, scale)
+		pix(x1, scale),
+		pix(y1, scale),
+		d1, d2,
 	]
+}
+
+function plan_scale(plan, w, h) {
+	return bb_scale(w, h, plan_bb(plan))
+}
+
+function face_scale(plan, vert, w, h) {
+	return bb_scale(w, h, face_bb(plan, vert))
 }
 
 let PLAN_VIEW_ID     = ui.S-1
@@ -817,8 +852,11 @@ ui.box_widget('face_view', {
 		let plan = a[i+FACE_VIEW_PLAN]
 		let face = a[i+FACE_VIEW_FACE]
 
+		// face is 1,2,3,4 going clockwise from the left-to-right face.
 		let face_vert = (face-1) & 1
 		let face_sign = face <= 2 ? 1 : -1
+
+		let [scale, face_x, face_y, min_depth, max_depth] = face_scale(plan, face_vert, w, h)
 
 		let hs = ui.hit(id)
 
@@ -829,6 +867,7 @@ ui.box_widget('face_view', {
 		cx.save()
 
 		cx.translate(x00, y00)
+		cx.translate(-face_x, -face_y)
 
 		// sort walls by depth.
 		let walls = []
@@ -849,9 +888,10 @@ ui.box_widget('face_view', {
 			return y1 < y2 ? face_sign : y1 > y2 ? -face_sign : 0
 		})
 
-		let storey_num = 0
-		for (let storey of plan.storeys) {
-			storey_num++
+		for (let storey_num = plan.storeys.length; storey_num >= 1; storey_num--) {
+
+			let storey = plan.storeys[storey_num-1]
+			let h = pix(storey.h, scale)
 
 			// draw walls (offset face) in depth order.
 			let X = face_vert ? 1 : 0
@@ -861,18 +901,19 @@ ui.box_widget('face_view', {
 				if ((wr.storey ?? 1) != storey_num)
 					continue
 
-				let p1 = wall_p1(wr, i+0, true)
-				let p2 = wall_p1(wr, i+1, true)
+				let p1 = wall_p1(wr, i+0, true, null, scale)
+				let p2 = wall_p1(wr, i+1, true, null, scale)
 				let x1 = p1[X]
 				let x2 = p2[X]
 				let x = min(x1, x2)
 				let w = max(x1, x2) - x
 				let y = p1[Y]
-				let h = storey.h
+
+				let depth = lerp(p1[Y], min_depth * scale, max_depth * scale, 0, 1)
 
 				cx.beginPath()
 				cx.rect(x, 0, w, h)
-				cx.fillStyle = ui.hsl_adjust(ui.bg_color_hsl('bg3'), 1, 1, p1[Y] / 500)
+				cx.fillStyle = ui.hsl_adjust(ui.bg_color_hsl('bg3'), 1, 1, depth)
 				cx.fill()
 
 				cx.beginPath()
@@ -890,6 +931,11 @@ ui.box_widget('face_view', {
 
 						let [x, y, w, h] = op_class.face_rect(op, wr, i, storey)
 
+						x = pix(x, scale)
+						y = pix(y, scale)
+						w = pix(w, scale)
+						h = pix(h, scale)
+
 						cx.save()
 						cx.translate(x, y)
 
@@ -906,7 +952,7 @@ ui.box_widget('face_view', {
 
 			}
 
-			cx.translate(0, -storey.h)
+			cx.translate(0, h)
 
 		}
 
@@ -972,9 +1018,7 @@ let plan = {
 				{to: 150,},
 				{to: 400,},
 				{to:   0,},
-				{to:   0, openings: [
-					{type: 'window', d: 50, w: 150, h: 50, y: 20},
-				]},
+				{to:   0,},
 			],
 		},
 		{
@@ -984,7 +1028,9 @@ let plan = {
 			thickness: 5,
 			walls: [
 				{to: 100,},
-				{to: 100,},
+				{to: 100,openings: [
+					{type: 'window', d: 20, w: 50, h: 50, y: 20},
+				]},
 				{to: 200,},
 				{to: 200,},
 				{to: 100, openings: [
@@ -995,7 +1041,7 @@ let plan = {
 				{to: 400,},
 				{to:   0,},
 				{to:   0, openings: [
-					{type: 'window', d: 50, w: 150, h: 50, y: 20},
+					{type: 'window', d: 0, w: 150, h: 50, y: 20},
 				]},
 			],
 		},
@@ -1020,16 +1066,31 @@ ui.main = function() {
 
 	ui.m(100)
 	ui.h()
+
 		ui.v()
-			ui.plan_view('pv1', plan, 1)
-			ui.plan_view('pv2', plan, 2)
+
+			for (let storey = plan.storeys.length; storey >= 1; storey--) {
+				ui.m(10)
+				ui.stack()
+					ui.bb('', null, null, 1, 'light')
+					ui.plan_view('pv'+storey, plan, storey)
+				ui.end_stack()
+			}
+
 		ui.end_v()
+
 		ui.v()
-			ui.face_view('fv1', plan, 1)
-			ui.face_view('fv2', plan, 2)
-			ui.face_view('fv2', plan, 3)
-			ui.face_view('fv2', plan, 4)
+
+			for (let face = 1; face <= 4; face++) {
+				ui.m(10)
+				ui.stack()
+					ui.bb('', null, null, 1, 'light')
+					ui.face_view('fv'+face, plan, face)
+				ui.end_stack()
+			}
+
 		ui.end_v()
+
 	ui.end_h()
 }
 
