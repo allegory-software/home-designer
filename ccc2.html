@@ -251,11 +251,16 @@ let comp = {}
 comp.door   = {}
 comp.window = {}
 
-comp.door.plan_rect = function(e, wr, i) {
-	let t = wr.thickness ?? 5
-	let r = [e.sx || 0, e.sy || 0, e.w, t, 0]
+// in pixels, relative to widget, aligned to plan walls.
+function opening_plan_rect(e, wr, i, scale) {
+	let t = pix(wr.thickness, scale)
+	let r = [0, 0, 0, 0, 0] // (x, y, w, h, rotation)
+	r[0] = pix(e.sx || 0, scale)
+	r[1] = pix(e.sy || 0, scale)
+	r[2] = pix(e.w, scale)
+	r[3] = t
 	if (i != null) {
-		let p1    = wall_p1          (wr, i)
+		let p1    = wall_p1          (wr, i, null, null, scale)
 		let vert  = wall_vert        (wr, i)
 		let sign  = wall_sign        (wr, i)
 		let osign = wall_offset_sign (wr, i)
@@ -263,35 +268,41 @@ comp.door.plan_rect = function(e, wr, i) {
 		let Y = vert ? 0 : 1
 		r[0] = p1[0]
 		r[1] = p1[1]
+		let d = pix(e.d, scale)
 		if (!vert) {
-			r[0] += sign * e.d
+			r[0] += sign * d
 			r[1] -= sign * t
 			r[4]  = sign < 0 ? -180 * rad : 0
 		} else if (vert) {
 			r[0] += sign * t
-			r[1] += sign * e.d
+			r[1] += sign * d
 			r[4]  = sign * 90 * rad
 		}
 	}
 	return r
 }
-comp.window.plan_rect = comp.door.plan_rect
 
-comp.door.face_rect = function(e, wr, i, storey) {
-	let t = wr.thickness
-	let r = [e.x, storey.h - e.h - (e.y || 0), e.w, e.h]
+// in pixels, relative to storey facade, aligned to wall face.
+function opening_face_rect(e, wr, i, storey, scale) {
+	let t = pix(wr.thickness, scale)
+	let r = [0, 0, 0, 0, 0] // (x, y, w, h, rotation)
+	r[0] = !wr ? pix(e.sx, scale) : pix(e.x, scale)
+	r[1] = !wr ? pix(e.sy, scale) : pix(storey.h - e.h - (e.y || 0), scale)
+	r[2] = pix(e.w, scale)
+	r[3] = pix(e.h, scale)
 	if (i != null) {
-		let p1   = wall_p1          (wr, i)
+		let p1   = wall_p1          (wr, i, null, null, scale)
 		let vert = wall_vert        (wr, i)
 		let dir  = wall_sign        (wr, i)
 		let odir = wall_offset_sign (wr, i)
 		let X = vert
 		let Y = 1-vert
-		r[0] = p1[X] + (dir > 0 ? e.d : -(e.d + e.w))
+		let d = pix(e.d, scale)
+		let w = pix(e.w, scale)
+		r[0] = p1[X] + (dir > 0 ? d : -(d + w))
 	}
 	return r
 }
-comp.window.face_rect = comp.door.face_rect
 
 comp.door.draw_plan = function(cx, e, w, h, hs) {
 	cx.beginPath()
@@ -463,12 +474,7 @@ function draw_wall_openings(cx, scale, wr, hs) {
 			for (let op of wall.openings) {
 
 				let op_class = comp[op.type]
-				let [x, y, w, h, rotation] = op_class.plan_rect(op, wr, i)
-
-				x = pix(x, scale)
-				y = pix(y, scale)
-				w = pix(w, scale)
-				h = pix(h, scale)
+				let [x, y, w, h, rotation] = opening_plan_rect(op, wr, i, scale)
 
 				cx.save()
 				cx.translate(x, y)
@@ -487,7 +493,7 @@ function draw_wall_openings(cx, scale, wr, hs) {
 	}
 }
 
-function hit_opening(wr, id) {
+function hit_opening_plan(wr, id, scale) {
 	let i = -1
 	for (let wall of wr.walls) {
 		i++
@@ -496,7 +502,7 @@ function hit_opening(wr, id) {
 		for (let op of wall.openings) {
 
 			let op_class = comp[op.type]
-			let [x, y, w, h, rotation] = op_class.plan_rect(op, wr, i)
+			let [x, y, w, h, rotation] = opening_plan_rect(op, wr, i, scale)
 
 			let cx = ui.cx
 			cx.save()
@@ -516,12 +522,12 @@ function hit_opening(wr, id) {
 	}
 }
 
-function hit_walls(wr, id) {
+function hit_wall_plan(wr, id, scale) {
 	for (let i = 0, n = wr.walls.length; i < n; i++) {
-		let x  = wall_x1(wr, i)
-		let y  = wall_y1(wr, i)
-		let x2 = wall_x2(wr, i)
-		let y2 = wall_y2(wr, i)
+		let x  = pix(wall_x1(wr, i), scale)
+		let y  = pix(wall_y1(wr, i), scale)
+		let x2 = pix(wall_x2(wr, i), scale)
+		let y2 = pix(wall_y2(wr, i), scale)
 		let h = y2 == y
 		if (
 			(!h && abs(ui.mx - x) < 5 && ui.my >= min(y, y2) && ui.my <= max(y, y2)) ||
@@ -534,6 +540,20 @@ function hit_walls(wr, id) {
 			return true
 		}
 	}
+}
+
+function hit_plan(plan, storey, id, scale) {
+
+	for (let wr of plan.wall_runs)
+		if ((wr.storey ?? 1) == storey)
+			if (hit_opening_plan(wr, id, scale))
+				return true
+
+	for (let wr of plan.wall_runs)
+		if ((wr.storey ?? 1) == storey)
+			if (hit_wall_plan(wr, id, scale))
+				return true
+
 }
 
 function plan_bb(plan) {
@@ -744,20 +764,9 @@ ui.box_widget('plan_view', {
 			cx.save()
 			cx.translate(x00, y00)
 			cx.translate(-plan_x, -plan_y)
-			cx.scale(scale, scale)
 			ui.update_mouse()
 
-			;(function() {
-				for (let wr of plan.wall_runs)
-					if ((wr.storey ?? 1) == storey)
-						if (hit_opening(wr, id))
-							return
-
-				for (let wr of plan.wall_runs)
-					if ((wr.storey ?? 1) == storey)
-						if (hit_walls(wr, id))
-							return
-			})()
+			hit_plan(plan, storey, id, scale)
 
 			cx.restore()
 			ui.update_mouse()
@@ -769,6 +778,90 @@ ui.box_widget('plan_view', {
 })
 
 // face view widget ----------------------------------------------------------
+
+// sort walls by depth.
+function sort_face_walls(plan, face_vert, face_sign) {
+	let walls = [] // [[wr1, i1], ...]
+	for (let wr of plan.wall_runs) {
+		if (!wr.exterior)
+			continue
+		for (let i = 0, n = wr.walls.length; i < n; i++) {
+			if (wall_vert(wr, i) != face_vert)
+				continue
+			if (wall_sign(wr, i) != face_sign)
+				continue
+			walls.push([wr, i])
+		}
+	}
+	walls.sort(function(e1, e2) {
+		let y1 = wall_Y(e1[0], e1[1])
+		let y2 = wall_Y(e2[0], e2[1])
+		return y1 < y2 ? face_sign : y1 > y2 ? -face_sign : 0
+	})
+	return walls
+}
+
+function wall_face_rect(plan, storey, wr, i, scale) {
+	let h = pix(storey.h, scale)
+	let v  = wall_vert(wr, i)
+	let p1 = wall_p1(wr, i+0, true, null, scale)
+	let p2 = wall_p1(wr, i+1, true, null, scale)
+	let X = v ? 1 : 0
+	let Y = v ? 0 : 1
+	let x1 = p1[X]
+	let x2 = p2[X]
+	let x = min(x1, x2)
+	let w = max(x1, x2) - x
+	let y = 0
+	return [x, y, w, h, p1[Y]] // (x, y, w, h, z)
+}
+
+function hit_opening_face(plan, storey, wr, i, id, scale) {
+
+	let wall = wr.walls[i]
+	if (!wall.openings)
+		return
+	for (let op of wall.openings) {
+
+		let [x, y, w, h, rotation] = opening_face_rect(op, wr, i, storey, scale)
+
+		let cx = ui.cx
+		cx.save()
+		cx.translate(x, y)
+		cx.rotate(rotation)
+		ui.update_mouse()
+		let hit = ui.hit_rect(- 5, - 5, w + 10, h + 10)
+		cx.restore()
+
+		if (hit) {
+			let hs = ui.hover(id)
+			hs.set('opening', op)
+			return true
+		}
+	}
+}
+
+function hit_wall_face(plan, storey, wr, i, id, scale) {
+	let [x, y, w, h] = wall_face_rect(plan, storey, wr, i, scale)
+	if (ui.hit_rect(x, y, w, h)) {
+		let hs = ui.hover(id)
+		//hs.set('wall_run', wr)
+		//hs.set('pi', i)
+		//hs.set('side', h ? 'y' : 'x')
+		return true
+	}
+}
+
+function hit_face(plan, storey, storey_num, walls, id, scale) {
+	for (let [wr, i] of walls) {
+		if ((wr.storey ?? 1) != storey_num)
+			continue
+		if (hit_opening_face(plan, storey, wr, i, id, scale))
+			return true
+		if (hit_wall_face(plan, storey, wr, i, id, scale))
+			return true
+	}
+}
 
 let FACE_VIEW_ID   = ui.S-1
 let FACE_VIEW_PLAN = ui.S+0
@@ -869,24 +962,7 @@ ui.box_widget('face_view', {
 		cx.translate(x00, y00)
 		cx.translate(-face_x, -face_y)
 
-		// sort walls by depth.
-		let walls = []
-		for (let wr of plan.wall_runs) {
-			if (!wr.exterior)
-				continue
-			for (let i = 0, n = wr.walls.length; i < n; i++) {
-				if (wall_vert(wr, i) != face_vert)
-					continue
-				if (wall_sign(wr, i) != face_sign)
-					continue
-				walls.push([wr, i])
-			}
-		}
-		walls.sort(function(e1, e2) {
-			let y1 = wall_Y(e1[0], e1[1])
-			let y2 = wall_Y(e2[0], e2[1])
-			return y1 < y2 ? face_sign : y1 > y2 ? -face_sign : 0
-		})
+		let walls = sort_face_walls(plan, face_vert, face_sign)
 
 		for (let storey_num = plan.storeys.length; storey_num >= 1; storey_num--) {
 
@@ -901,18 +977,12 @@ ui.box_widget('face_view', {
 				if ((wr.storey ?? 1) != storey_num)
 					continue
 
-				let p1 = wall_p1(wr, i+0, true, null, scale)
-				let p2 = wall_p1(wr, i+1, true, null, scale)
-				let x1 = p1[X]
-				let x2 = p2[X]
-				let x = min(x1, x2)
-				let w = max(x1, x2) - x
-				let y = p1[Y]
+				let [x, y, w, h, z] = wall_face_rect(plan, storey, wr, i, scale)
 
-				let depth = lerp(p1[Y], min_depth * scale, max_depth * scale, 0, 1)
+				let depth = lerp(z, min_depth * scale, max_depth * scale, 0, 1)
 
 				cx.beginPath()
-				cx.rect(x, 0, w, h)
+				cx.rect(x, y, w, h)
 				cx.fillStyle = ui.hsl_adjust(ui.bg_color_hsl('bg3'), 1, 1, depth)
 				cx.fill()
 
@@ -927,14 +997,7 @@ ui.box_widget('face_view', {
 				if (ops) {
 					for (let op of ops) {
 
-						let op_class = comp[op.type]
-
-						let [x, y, w, h] = op_class.face_rect(op, wr, i, storey)
-
-						x = pix(x, scale)
-						y = pix(y, scale)
-						w = pix(w, scale)
-						h = pix(h, scale)
+						let [x, y, w, h] = opening_face_rect(op, wr, i, storey, scale)
 
 						cx.save()
 						cx.translate(x, y)
@@ -944,6 +1007,7 @@ ui.box_widget('face_view', {
 						cx.fillStyle = ui.bg_color('bg')
 						cx.fill()
 
+						let op_class = comp[op.type]
 						op_class.draw_face(cx, op, w, h, hs)
 
 						cx.restore()
@@ -970,6 +1034,7 @@ ui.box_widget('face_view', {
 		let plan = a[i+FACE_VIEW_PLAN]
 		let face = a[i+FACE_VIEW_FACE]
 
+		// face is 1,2,3,4 going clockwise from the left-to-right face.
 		let face_vert = (face-1) & 1
 		let face_sign = face <= 2 ? 1 : -1
 
@@ -978,15 +1043,33 @@ ui.box_widget('face_view', {
 
 		if (!cs) {
 
-			/*
-			for (let wr of plan.wall_runs)
-				if (hit_opening(wr, x00, y00, id))
-					return
+			let [scale, face_x, face_y] = face_scale(plan, face_vert, w, h)
 
-			for (let wr of plan.wall_runs)
-				if (hit_walls(wr, x00, y00, id))
-					return
-			*/
+			let cx = ui.cx
+
+			cx.save()
+			cx.translate(x00, y00)
+			cx.translate(-face_x, -face_y)
+			ui.update_mouse()
+
+			let walls = sort_face_walls(plan, face_vert, face_sign)
+			walls.reverse()
+
+			let y = 0
+			for (let storey_num = plan.storeys.length; storey_num >= 1; storey_num--) {
+
+				let storey = plan.storeys[storey_num-1]
+
+				if (hit_face(plan, storey, storey_num, walls, id, scale))
+					break
+
+				y += pix(storey.h, scale)
+				cx.translate(0, y)
+				ui.update_mouse()
+			}
+
+			cx.restore()
+			ui.update_mouse()
 
 		}
 
