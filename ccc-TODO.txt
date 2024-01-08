@@ -1,4 +1,26 @@
 
+- TODO: component palette
+
+- FIX: butt-joint bug
+
+- FIX: dx,dy dragging needs scaling
+
+- TODO: drag-move opening: pick the closest free range and clamp to it.
+
+- TODO: drag-move opening:
+	- TODO: pick the closest wall
+		- go outside walls if no wall is close enough
+	- TODO: pick the closest free range and clamp to it.
+
+- TODO: drag-move opening:
+
+- drag opening:
+	- constrain position to free space when moving and resizing
+	- resize by each end
+	- move outside walls on the empty space
+	- auto-shrink to fit free space on the wall + padding
+
+
 - FINISH: scalable drawing
 	- TODO: use same scale for all views
 	- TODO: zoom in/out/reset
@@ -11,15 +33,6 @@
 - TODO: keep exterior walls aligned on the outside edge between storeys
 
 - TODO: merge storey facade walls to form a continuous facade polygon.
-
-- drag opening:
-	- move along walls
-	- resize by each end
-	- move outside walls on the empty space
-	- auto-shrink to fit free space on the wall + padding
-	- constrain position to free space when moving and resizing
-
-- draw facade obscuring walls with transparent color.
 
 - plan: draw below stories on the outside with faded dotted color.
 

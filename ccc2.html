@@ -11,6 +11,10 @@
 <script src=ui_grid.js></script>
 <script>
 
+(function () {
+"use strict"
+const G = window
+
 /* THE WALLS MODEL
 ------------------------------------------------------------------------------
 
@@ -52,26 +56,11 @@ function wall_vert(wr, i) { return ((wr.vertical ? 1 : 0) + i) & 1 }
 // get/set wall coordinates in wall's own space.
 // capital X means wall's main axis, Y means cross axis.
 // for horizontal walls X is x and Y is y, for vertical walls X is y and Y is x.
-
-function wall_X1 (wr, i) { return wr.walls[mod(i-2, wr.walls.length)].to }
-function wall_X2 (wr, i) { return wr.walls[mod(i-0, wr.walls.length)].to }
-function wall_Y  (wr, i) { return wr.walls[mod(i-1, wr.walls.length)].to }
+function wall_Y_no_offset(wr, i) { return wr.walls[mod(i-1, wr.walls.length)].to }
 
 function wall_set_X1 (wr, i, v) { wr.walls[mod(i-2, wr.walls.length)].to = v }
 function wall_set_X2 (wr, i, v) { wr.walls[mod(i-0, wr.walls.length)].to = v }
 function wall_set_Y  (wr, i, v) { wr.walls[mod(i-1, wr.walls.length)].to = v }
-
-// get/set wall coordinates in plan space.
-
-function wall_x1(wr, i) { return wr.walls[mod(i-2+wall_vert(wr, i), wr.walls.length)].to }
-function wall_y1(wr, i) { return wr.walls[mod(i-1-wall_vert(wr, i), wr.walls.length)].to }
-function wall_x2(wr, i) { return wr.walls[mod(i-0-wall_vert(wr, i), wr.walls.length)].to }
-function wall_y2(wr, i) { return wr.walls[mod(i-1+wall_vert(wr, i), wr.walls.length)].to }
-
-function set_wall_x1(wr, i, v) { wr.walls[mod(i-2+wall_vert(wr, i), wr.walls.length)].to = v }
-function set_wall_y1(wr, i, v) { wr.walls[mod(i-1-wall_vert(wr, i), wr.walls.length)].to = v }
-function set_wall_x2(wr, i, v) { wr.walls[mod(i-0-wall_vert(wr, i), wr.walls.length)].to = v }
-function set_wall_y2(wr, i, v) { wr.walls[mod(i-1+wall_vert(wr, i), wr.walls.length)].to = v }
 
 // wall's main axis unit vector: positive when pointing to right and down.
 function wall_sign(wr, i) {
@@ -90,57 +79,68 @@ function wall_offset_sign(wr, i) {
 	return v ? s : -s
 }
 
-// wall's starting point in plan space as (x, y).
-// oY is the offset on the wall's cross axis (true = thickness).
-// oX is the offset on the wall's main axis (optional).
-function wall_p1(wr, i, oY, oX, scale) {
-	let p = [
-		pix(wall_x1(wr, i), scale),
-		pix(wall_y1(wr, i), scale)
-	]
-	if (!(oY || oX))
-		return p
+// wall's offset point at oY on wall's cross axis.
+function wall_Y(wr, i, oY, scale) {
+	let Y = pix(wall_Y_no_offset(wr, i), scale)
+	if (!oY)
+		return Y
+	if (!wr.closed) {
+		let n = wr.walls.length
+		i = mod(i, n)
+		if (i >= n-2) // wall-run's ends are cut straight.
+			return Y
+	}
 	if (oY === true)
 		oY = wr.thickness * (wr.offset_sign ?? 1)
-	let v1 = wall_vert(wr, i)
-	let s1 = wall_sign(wr, i)
-	let s0 = wall_sign(wr, i-1)
-	if (oX == null) {
+	let os = wall_offset_sign(wr, i)
+	return Y + pix(os * oY, scale)
+}
+
+// wall's offset point at oX of wall's start-point (X1) or end-point (X2) on wall's main axis.
+function wall_X1(wr, i, oX, scale) { return wall_Y(wr, i-1, oX, scale) }
+function wall_X2(wr, i, oX, scale) { return wall_Y(wr, i+1, oX, scale) }
+
+function wall_X1Y(wr, i, oY, oX, scale) {
+	if (oX == null)
 		oX = oY
-		if (!wr.closed) {
-			let n = wr.walls.length
-			i = mod(i, n)
-			if (i == 0 || i == n-2) // wall-run's ends are cut straight.
-				oX = 0
-			if (i == n-2) // use starting point's orientation for the end point.
-				v1 = 1-v1
-		}
-	}
-	let sx = 0
-	let sy = 0
-	if (s1 == s0) {
-		sx =  s1
-		sy = -s1
-	} else {
-		sx = (s1 < s0) == v1 ? -1 : 1
-		sy = sx
-	}
-	let ox = sx * (v1 ? oY : oX)
-	let oy = sy * (v1 ? oX : oY)
-	p[0] += pix(ox, scale)
-	p[1] += pix(oy, scale)
-	return p
+	let X = wall_X1(wr, i, oX, scale)
+	let Y = wall_Y (wr, i, oY, scale)
+	return [X, Y]
 }
 
 function wall_end_XY(wr, first, oY, oX) {
 	assert(!wr.closed)
 	let i = first ? 0 : wr.walls.length-2
-	let [x, y] = wall_p1(wr, i, oY, oX)
-	if (wall_vert(wr, first ? i : i-1))
-		return [y, x]
-	else
-		return [x, y]
+	// let [x, y] =
+	return wall_X1Y(wr, i, oY, oX)
+	// if (wall_vert(wr, first ? i : i-1))
+	// 	return [y, x]
+	// else
+	// 	return [x, y]
 }
+
+// wall's starting point in plan space as (x, y).
+function wall_p1(wr, i, oY, oX, scale) {
+	let p = wall_X1Y(wr, i, oY, oX, scale)
+	if (wall_vert(wr, i)) {
+		let p1 = p[1]
+		p[1] = p[0]
+		p[0] = p1
+	}
+	return p
+}
+
+// get/set wall coordinates in plan space.
+
+function wall_x1(wr, i) { return wr.walls[mod(i-2+wall_vert(wr, i), wr.walls.length)].to }
+function wall_y1(wr, i) { return wr.walls[mod(i-1-wall_vert(wr, i), wr.walls.length)].to }
+function wall_x2(wr, i) { return wr.walls[mod(i-0-wall_vert(wr, i), wr.walls.length)].to }
+function wall_y2(wr, i) { return wr.walls[mod(i-1+wall_vert(wr, i), wr.walls.length)].to }
+
+function set_wall_x1(wr, i, v) { wr.walls[mod(i-2+wall_vert(wr, i), wr.walls.length)].to = v }
+function set_wall_y1(wr, i, v) { wr.walls[mod(i-1-wall_vert(wr, i), wr.walls.length)].to = v }
+function set_wall_x2(wr, i, v) { wr.walls[mod(i-0-wall_vert(wr, i), wr.walls.length)].to = v }
+function set_wall_y2(wr, i, v) { wr.walls[mod(i-1+wall_vert(wr, i), wr.walls.length)].to = v }
 
 // points are in polygon order, but lines are in offset sign order i.e. first
 // the left line then the right, first the top line then the bottom.
@@ -157,7 +157,7 @@ function wall_lines(wr, i, o) {
 
 // wall's bounding rectangle to ose as solid obstacle to constrian movement.
 // returns (x1, y1, x2, y2), not (x, y, w, h)!
-function wall_rect(wr, i, o) {
+function wall_bb(wr, i, o) {
 	let p1  = wall_p1(wr, i+0)
 	let p2  = wall_p1(wr, i+1)
 	let op1 = wall_p1(wr, i+0, o ?? true)
@@ -172,6 +172,7 @@ function wall_rect(wr, i, o) {
 	r[Y+2] = max(p1[Y], op1[Y])
 	return r
 }
+
 
 function wall_joints(plan, wr, i) {
 	let v  = wall_vert        (wr, i)
@@ -246,10 +247,12 @@ function aligned_walls(plan, wr, i) {
 
 // END WALLS MODEL -----------------------------------------------------------
 
-let comp = {}
+let comp = obj()
 
 comp.door   = {}
 comp.window = {}
+
+comp.window.exterior_only = true // can only be put on exterior walls
 
 // in pixels, relative to widget, aligned to plan walls.
 function opening_plan_rect(e, wr, i, scale) {
@@ -385,7 +388,7 @@ function moving_ranges(plan, wr, ti1, joints) {
 			if (continue2)
 				continue
 
-			let r = wall_rect(wr1, i1)
+			let r = wall_bb(wr1, i1)
 
 			if (r[Y+2] <= tl[0][Y]) // rect bottom side < top of the wall
 				if (overlap_segs(tl[0][X], tl[1][X], r[X], r[X+2])) {
@@ -515,7 +518,9 @@ function hit_opening_plan(wr, id, scale) {
 
 			if (hit) {
 				let hs = ui.hover(id)
-				hs.set('opening', op)
+				hs.set('opening' , op)
+				hs.set('wall_run', wr)
+				hs.set('pi'      , i)
 				return true
 			}
 		}
@@ -627,6 +632,59 @@ function face_scale(plan, vert, w, h) {
 	return bb_scale(w, h, face_bb(plan, vert))
 }
 
+function opening_move_ranges(op, plan) {
+	let w = op.w
+	let op_class = comp[op.type]
+	let exterior = op_class.exterior_only
+	let ranges = []
+	for (let wr of plan.wall_runs) {
+		if (exterior && !wr.exterior)
+			continue
+		let i = -1
+		for (let wall of wr.walls) {
+			i++
+
+			// find the min and max distances on an empty wall.
+			let X1m = wall_X1(wr, i)
+			let X1o = wall_X1(wr, i, true)
+			let X2m = wall_X2(wr, i)
+			let X2o = wall_X2(wr, i, true)
+			let o1, o2
+			if (wall_sign(wr, i) > 0) {
+				o1 = max(0, X1o - X1m)
+				o2 = max(0, X2m - X2o)
+			} else {
+				o1 = max(0, X1m - X1o)
+				o2 = max(0, X2o - X2m)
+			}
+			let min_d = o1
+			let max_d = abs(X2m - X1m) - op.w - o2
+
+			if (max_d - min_d < op.w)
+				continue // opening won't fit the free space.
+
+			// find the actual spaces in between other openings.
+			if (wall.openings) {
+				let op0
+				for (let j = 0, n = wall.openings.length; j <= n; j++) {
+					let op1 = j < n ? wall.openings[j] : null
+					if (op1 == op)
+						continue
+					let d0 = op0 ? op0.d + op0.w : min_d
+					let d1 = op1 ? op1.d : max_d
+					if (d1 - d0 < 0)
+						continue // opening won't fit this space.
+					ranges.push([wr, i, d0, d1])
+					op0 = op1
+				}
+			} else {
+				ranges.push([wr, i, min_d, max_d])
+			}
+		}
+	}
+	return ranges
+}
+
 let PLAN_VIEW_ID     = ui.S-1
 let PLAN_VIEW_PLAN   = ui.S+0
 let PLAN_VIEW_STOREY = ui.S+1
@@ -647,7 +705,10 @@ ui.box_widget('plan_view', {
 				ui.set_cursor(cursors[side])
 			let opening = hs.get('opening')
 			if (opening) {
-				ui.set_cursor('move')
+				let wr = hs.get('wall_run')
+				let i  = hs.get('pi')
+				let v = wall_vert(wr, i)
+				ui.set_cursor(cursors[v ? 'y' : 'x'])
 			}
 		}
 		if (dstate == 'drag') {
@@ -664,9 +725,18 @@ ui.box_widget('plan_view', {
 				cs.set('joints', joints)
 				cs.set('rs'    , moving_ranges(plan, wr, pi, joints))
 			}
-			let opening = hs.get('opening')
-			if (opening) {
-				cs.set('opening', opening)
+			let op = hs.get('opening')
+			if (op) {
+				let wr = hs.get('wall_run')
+				let i  = hs.get('pi')
+				let v = wall_vert(wr, i)
+				let ranges = opening_move_ranges(op, plan)
+				cs.set('opening'     , op)
+				cs.set('wall_run'    , wr)
+				cs.set('pi'          , i)
+				cs.set('d0'          , op.d)
+				cs.set('move_ranges' , ranges)
+				ui.set_cursor(cursors[v ? 'y' : 'x'])
 			}
 		}
 		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
@@ -688,9 +758,23 @@ ui.box_widget('plan_view', {
 				for (let joint of joints)
 					joint.update()
 			}
-			let opening = cs.get('opening')
-			if (opening) {
-				//
+			let op = cs.get('opening')
+			if (op) {
+				let wr = cs.get('wall_run')
+				let i  = cs.get('pi')
+				let v  = wall_vert(wr, i)
+				let s  = wall_sign(wr, i)
+				let d0 = cs.get('d0')
+				let ranges = cs.get('move_ranges')
+				ui.set_cursor(cursors[v ? 'y' : 'x'])
+				let scale = 1 // TODO
+				let d = d0 + s * (v ? dy : dx) / scale
+				for (let [wr1, i1, min_d, max_d] of ranges) {
+					if (wr1 == wr && i1 == i) {
+						op.d = clamp(d, min_d, max_d)
+						break
+					}
+				}
 			}
 		}
 
@@ -737,6 +821,17 @@ ui.box_widget('plan_view', {
 			draw_wall_openings(cx, scale, wr, hs)
 
 		}
+
+		let furniture = plan.storeys[storey-1].furniture
+		if (furniture)
+			for (let e of furniture) {
+				let e_class = comp[e.type]
+				let [x0, y0, w, h] = e_class.plan_rect(e, scale)
+				cx.save()
+				cx.translate(x0, y0)
+				e_class.draw_plan(cx, e, w, h)
+				cx.restore()
+			}
 
 		cx.restore()
 
@@ -852,13 +947,13 @@ function hit_wall_face(plan, storey, wr, i, id, scale) {
 	}
 }
 
-function hit_face(plan, storey, storey_num, walls, id, scale) {
+function hit_face(plan, storey, storey_num, walls, id, scale, transparent_walls) {
 	for (let [wr, i] of walls) {
 		if ((wr.storey ?? 1) != storey_num)
 			continue
 		if (hit_opening_face(plan, storey, wr, i, id, scale))
 			return true
-		if (hit_wall_face(plan, storey, wr, i, id, scale))
+		if (!transparent_walls && hit_wall_face(plan, storey, wr, i, id, scale))
 			return true
 	}
 }
@@ -873,6 +968,7 @@ ui.box_widget('face_view', {
 
 		let [dstate, dx, dy] = ui.drag(id)
 
+		/*
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
 		let cursors = {x: 'ew-resize', y: 'ns-resize'}
@@ -929,6 +1025,7 @@ ui.box_widget('face_view', {
 				//
 			}
 		}
+		*/
 
 		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
 				id, plan, face
@@ -983,7 +1080,7 @@ ui.box_widget('face_view', {
 
 				cx.beginPath()
 				cx.rect(x, y, w, h)
-				cx.fillStyle = ui.hsl_adjust(ui.bg_color_hsl('bg3'), 1, 1, depth)
+				cx.fillStyle = ui.hsl_adjust(ui.bg_color_hsl('bg3'), 1, 1, depth, 1 - depth/4)
 				cx.fill()
 
 				cx.beginPath()
@@ -1060,7 +1157,7 @@ ui.box_widget('face_view', {
 
 				let storey = plan.storeys[storey_num-1]
 
-				if (hit_face(plan, storey, storey_num, walls, id, scale))
+				if (hit_face(plan, storey, storey_num, walls, id, scale, true))
 					break
 
 				y += pix(storey.h, scale)
@@ -1077,10 +1174,113 @@ ui.box_widget('face_view', {
 
 })
 
+// components ----------------------------------------------------------------
+
+comp.table = {}
+
+comp.table.plan_rect = function(e, scale) {
+	let x = pix(e.x, scale)
+	let y = pix(e.y, scale)
+	let w = 100
+	let h = 50
+	return [x, y, w, h]
+}
+
+comp.table.draw_plan = function(cx, e, w, h, hs) {
+	cx.rect(.5, .5, w, h)
+	cx.strokeStyle = ui.fg_color('text')
+	cx.stroke()
+}
+
+comp.bed = {}
+
+comp.bed.plan_rect = function(e, scale) {
+	let x = pix(e.x, scale)
+	let y = pix(e.y, scale)
+	let w = 80
+	let h = 100
+	return [x, y, w, h]
+}
+
+comp.bed.draw_plan = function(cx, e, w, h, hs) {
+	cx.rect(.5, .5, w, h)
+	cx.strokeStyle = ui.fg_color('text')
+	cx.stroke()
+}
+
+// component palette ---------------------------------------------------------
+
+let COMPS_ID   = ui.S-1
+let COMPS_PLAN = ui.S+0
+
+ui.box_widget('comps', {
+
+	create: function(cmd, id, plan, fr, align, valign, min_w, min_h) {
+		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
+				id, plan,
+			)
+	},
+
+	draw: function(a, i) {
+
+		let x00  = a[i+0]
+		let y00  = a[i+1]
+		let w    = a[i+2]
+		let h    = a[i+3]
+		let id   = a[i+COMPS_ID]
+		let plan = a[i+COMPS_PLAN]
+
+		let scale = 1
+
+		let x = x00
+		let y = y00
+
+		let cx = ui.cx
+
+		for (let k in comp) {
+
+			let e = comp[k]
+
+			if (!e.plan_rect)
+				continue
+
+			let [x0, y0, w, h] = e.plan_rect(e, scale)
+
+			cx.save()
+			cx.translate(x, y)
+			cx.translate(x0, y0)
+
+			e.draw_plan(cx, e, w, h)
+
+			cx.restore()
+
+			y += h + 10
+		}
+
+	},
+
+	hit: function(a, i) {
+
+		let x00  = a[i+0]
+		let y00  = a[i+1]
+		let w    = a[i+2]
+		let h    = a[i+3]
+		let id   = a[i+COMPS_ID]
+		let plan = a[i+COMPS_PLAN]
+
+	},
+
+})
+
+// test plan -----------------------------------------------------------------
+
 let plan = {
 	storeys: [
-		{h: 80},
-		{h: 80},
+		{h: 80,},
+		{h: 80, furniture: [
+			{type: 'table', x: 10, y: 100},
+			{type: 'bed'  , x: 10, y: 200},
+		]},
 	],
 	wall_runs: [
 		{
@@ -1145,6 +1345,8 @@ let plan = {
 	],
 }
 
+// test UI --------------------------------------------------------------------
+
 ui.main = function() {
 
 	ui.m(100)
@@ -1174,8 +1376,12 @@ ui.main = function() {
 
 		ui.end_v()
 
+		ui.comps()
+
 	ui.end_h()
 }
+
+}()) // module function
 
 </script>
 </body>
