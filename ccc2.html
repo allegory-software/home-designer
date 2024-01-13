@@ -285,12 +285,12 @@ function opening_plan_rect(e, wr, i, scale) {
 	return r
 }
 
-// in pixels, relative to storey facade, aligned to wall face.
-function opening_face_rect(e, wr, i, storey, scale) {
+// in pixels, relative to level facade, aligned to wall face.
+function opening_face_rect(e, wr, i, level, scale) {
 	let t = pix(wr.thickness, scale)
 	let r = [0, 0, 0, 0, 0] // (x, y, w, h, rotation)
 	r[0] = !wr ? pix(e.sx, scale) : pix(e.x, scale)
-	r[1] = !wr ? pix(e.sy, scale) : pix(storey.h - e.h - (e.y || 0), scale)
+	r[1] = !wr ? pix(e.sy, scale) : pix(level.h - e.h - (e.y || 0), scale)
 	r[2] = pix(e.w, scale)
 	r[3] = pix(e.h, scale)
 	if (i != null) {
@@ -316,8 +316,8 @@ comp.door.draw_plan = function(cx, e, w, h, hs) {
 }
 
 comp.window.draw_plan = function(cx, e, w, h, hs) {
-	cx.beginPath()
 	let sill_offset = round(h * 1/2)
+	cx.beginPath()
 	cx.rect(.5, .5, w, h + sill_offset)
 	cx.moveTo(    .5, -sill_offset + round(h * 1/4) - .5)
 	cx.lineTo(w - .5 - 10, -sill_offset + round(h * 1/4) - .5)
@@ -373,8 +373,8 @@ function moving_ranges(plan, wr, ti1, joints) {
 			if (wr1 == wr && (i1 == ti1 || i1 == ti0 || i1 == ti2))
 				continue
 
-			// exclude other storeys' walls
-			if ((wr1.storey ?? 1) != (wr.storey ?? 1)	)
+			// exclude other levels' walls
+			if ((wr1.level ?? 1) != (wr.level ?? 1)	)
 				continue
 
 			// exclude jointed walls which move along.
@@ -456,7 +456,7 @@ function begin_open_wall_path(cx, scale, wr, o) {
 	// draw offset path in reverse.
 	for (let i = n-1; i >= 0; i--) {
 		let [x, y] = wall_p1(wr, i, o ?? true, null, scale)
-		cx.lineTo(x, y)
+			cx.lineTo(x, y)
 	}
 
 	cx.closePath()
@@ -547,17 +547,271 @@ function hit_wall_plan(wr, id, scale) {
 	}
 }
 
-function hit_plan(plan, storey, id, scale) {
+// ---------------------------------------------------------------------------
 
+function joints_at(walls_h, walls_v, xi, yi) {
+	let joint_r = walls_h[yi][xi]
+	let joint_b = walls_v[xi][yi]
+	let joint_l = walls_h[yi][xi-1]
+	let joint_t = walls_v[xi][yi-1]
+}
+
+function hit_wall_middle(xs, xi1, xi2, x, px) {
+	let x1 = xs[xi1]
+	let x2 = xs[xi2]
+	let xc = (x1+x2) / 2
+	let d = min(5*px, (x2-x1)/3)
+	return x >= xc-d && x <= xc+d
+}
+
+function point_type(lv, xi, yi) {
+	let r = lv.walls_h[yi][xi]
+	let b = lv.walls_v[xi][yi]
+	let l = lv.walls_h[yi][xi-1] ?? 0
+	let t = lv.walls_v[xi][yi-1] ?? 0
+	let ends = r + b + l + t
+	if (!ends)
+		return
+	if (ends == 1)
+		return 'end'
+	if (r && l && !(t || b))
+		return // point along h-wall with no joint
+	if (t && b && !(r || l))
+		return // point along v-wall with no joint
+	return 'joint'
+}
+
+// sides: l,b,r,t == 1,2,-1,-2
+function hit_point_side(plan, xi, yi, mx, my) {
+	let dx = mx - plan.xs[xi]
+	let dy = my - plan.ys[yi]
+	return abs(dx) > abs(dy) ? (dx > 0 ? 1 : -1) : (dy > 0 ? 2 : -2)
+}
+
+function point_end_side(lv, xi, yi) {
+	let r = lv.walls_h[yi][xi]
+	let b = lv.walls_v[xi][yi]
+	let l = lv.walls_h[yi][xi-1]
+	let t = lv.walls_v[xi][yi-1]
+	return r ? 1 : b ? 2 : l ? -1 : t ? -2 : 0
+}
+
+function xs_add(plan, invert, lv, x) {
+
+	// add a vertical line to the grid.
+	let xs = invert ? plan.ys : plan.xs
+	let i = binsearch(xs, x)
+	insert(xs, i, x)
+
+	// add a vertical wall-line at the added grid line.
+	let wall_lines = invert ? lv.walls_h : lv.walls_v
+	let wall_line = []
+	wall_line.length = wall_lines[0].length
+	insert(wall_lines, i, wall_line.fill(0))
+
+	// reconnect _|_ walls that are split by the new point.
+	let splits_walls = i > 0 && i < xs.length
+	for (let lv of plan.levels) {
+		let wall_lines = invert ? lv.walls_v : lv.walls_h
+		if (wall_lines)
+			for (let walls of wall_lines)
+				insert(walls, i, splits_walls && walls[i-1] ? 1 : 0)
+	}
+	return i
+}
+
+function xs_del(plan, invert, lv, xi) {
+
+	// remove the vertical line from the grid.
+	let xs = invert ? plan.ys : plan.xs
+	remove(xs, xi)
+
+	// remove the vertical wall-line at the removed grid line.
+	let wall_lines = invert ? lv.walls_h : lv.walls_v
+	remove(wall_lines, xi)
+
+	// rmeove the point from all _|_ walls.
+	for (let lv of plan.levels) {
+		let wall_lines = invert ? lv.walls_v : lv.walls_h
+		if (wall_lines)
+			for (let walls of wall_lines)
+				remove(walls, xi)
+	}
+}
+
+function xs_move(plan, invert, lv, xi0, x1) {
+	return
+	let xs = invert ? plan.ys : plan.xs
+	if (x1 == xs[xi0]) // x didn't change
+		return xi0
+	let xi1 = binsearch(xs, x1)
+	if (xi1 == xi0 || xi1 == xi0+1) { // index in grid didn't change
+		xs[xi1] = x1
+		return xi1
+	}
+	if (xi1 > xi0) // insert point is shifted to the left after delete
+		xi1--
+	xs_del(plan, invert, lv, xi0)
+	xs_add(plan, invert, lv, x1)
+	return xi1
+}
+
+function wall_v_start_move(plan, invert, lv, xi0, yi1, yi2) {
+	let xs = invert ? plan.ys : plan.xs
+	let x = xs[xi0]
+	let xi1 = xs_add(plan, invert, lv, x - 5)
+	assert(xi1 == xi0)
+	xi0++
+	let wall_lines = invert ? lv.walls_h : lv.walls_v
+	// move moving wall to the new mobile grid line.
+	for (let yi = yi1; yi < yi2; yi++) {
+		wall_lines[xi0][yi] = 0
+		wall_lines[xi1][yi] = 1
+	}
+	return xi1
+}
+
+function wall_v_move(plan, invert, lv, xi, x) {
+	//return xs_move(plan, invert, lv, xi, x)
+}
+
+function wall_end_move() {
+
+}
+
+// ---------------------------------------------------------------------------
+
+// find the longest horizontal wall segment without joints that intersects x.
+function wall_intersecting(plan, invert, lv, yi, x) {
+	let walls_h = invert ? lv.walls_v : lv.walls_h
+	let walls_v = invert ? lv.walls_h : lv.walls_v
+	let xs = invert ? plan.ys : plan.xs
+	if (x < xs[0])
+		return [null, null]
+	let xi = binsearch(xs, x)
+	if (xi == xs.length)
+		return [null, null]
+	let xi2 = xi
+	let xi1 = xi-1
+	if (!walls_h[yi][xi1])
+		return [null, null]
+	while (walls_h[yi][xi2]   && !walls_v[xi2][yi] && !walls_v[xi2][yi-1]) xi2++
+	while (walls_h[yi][xi1-1] && !walls_v[xi1][yi] && !walls_v[xi1][yi-1]) xi1--
+	return [xi1, xi2]
+}
+
+function hit_plan(plan, level, id, scale, x0, y0) {
+
+	/*
 	for (let wr of plan.wall_runs)
-		if ((wr.storey ?? 1) == storey)
+		if ((wr.level ?? 1) == level)
 			if (hit_opening_plan(wr, id, scale))
 				return true
+	*/
 
+	let mx = (ui.mx - x0) / scale
+	let my = (ui.my - y0) / scale
+	let px = 1 / scale
+
+	let lv = plan.levels[(level ?? 1)-1]
+
+	let min_x = plan.xs[0]
+	let max_x = plan.xs[plan.xs.length-1]
+	let min_y = plan.ys[0]
+	let max_y = plan.ys[plan.ys.length-1]
+
+	// find closest point from the range of close-enough points.
+	let xi1 = binsearch(plan.xs, mx - 5*px)
+	let xi2 = binsearch(plan.xs, mx + 5*px)
+	let yi1 = binsearch(plan.ys, my - 5*px)
+	let yi2 = binsearch(plan.ys, my + 5*px)
+	{
+		let min_d2 = 1/0
+		let xi, yi
+		for (let i = xi1; i < xi2; i++) {
+			let x = plan.xs[i]
+			for (let j = yi1; j < yi2; j++) {
+				let y = plan.ys[j]
+				let d2 = (x - mx)**2 + (y - my)**2
+				if (d2 < min_d2) {
+					min_d2 = d2
+					xi = i
+					yi = j
+				}
+			}
+		}
+
+		// check if point has walls on it on lv.
+		let pt = xi != null && point_type(lv, xi, yi)
+		if (pt) {
+			let hs = ui.hover(id)
+			if (pt == 'end') { // resize or add
+				let hit_side = hit_point_side(plan, xi, yi, mx, my)
+				let end_side = point_end_side(lv, xi, yi)
+				let inline = abs(hit_side) == abs(end_side)
+				hs.set('action', inline ? 'resize' : 'add')
+			}
+			if (pt == 'joint') { // detach or add
+				let hit_side = hit_point_side(plan, xi, yi, mx, my)
+				let r = lv.walls_h[yi][xi-0] ?  1 : 0
+				let b = lv.walls_v[xi][yi-0] ?  2 : 0
+				let l = lv.walls_h[yi][xi-1] ? -1 : 0
+				let t = lv.walls_v[xi][yi-1] ?  2 : 0
+				let detach = hit_side == r || hit_side == b || hit_side == l || hit_side == t
+				hs.set('action', detach ? 'detach' : 'add')
+			}
+			hs.set('xi', xi)
+			hs.set('yi', yi)
+			pr(level, hs.get('action'), xi, yi)
+			return
+		}
+	}
+
+	// find closest wall from the range of close-enough walls.
+	for (let vert = 0; vert <= 1; vert++) {
+		let _xi1 = vert ? yi1 : xi1
+		let _xi2 = vert ? yi2 : xi2
+		let xs   = vert ? plan.ys : plan.xs
+		let ys   = vert ? plan.xs : plan.ys
+		let _mx  = vert ? my : mx
+		let _my  = vert ? mx : my
+		let wall_lines = vert ? lv.walls_h : lv.walls_v
+		let min_d = 1/0
+		let c_xi
+		let c_yi1
+		let c_yi2
+		for (let xi = _xi1; xi < _xi2; xi++) {
+			let [yi1, yi2] = wall_intersecting(plan, !vert, lv, xi, _my)
+			if (yi1 != null) {
+				let x = xs[xi]
+				let d = abs(x - _mx)
+				if (d < min_d) {
+					min_d = d
+					c_xi = xi
+					c_yi1 = yi1
+					c_yi2 = yi2
+				}
+			}
+		}
+		if (c_xi != null) {
+			let move = hit_wall_middle(ys, c_yi1, c_yi2, _my, px)
+			let hs = ui.hover(id)
+			hs.set('action', move ? 'move_wall_v' : 'add_wall_h')
+			hs.set('invert', vert)
+			hs.set('xi' , c_xi )
+			hs.set('yi1', c_yi1)
+			hs.set('yi2', c_yi2)
+			hs.set('y'  , _my)
+			pr(level, hs.get('action'), c_xi, c_yi1, c_yi2)
+		}
+	}
+
+	/*
 	for (let wr of plan.wall_runs)
-		if ((wr.storey ?? 1) == storey)
+		if ((wr.level ?? 1) == level)
 			if (hit_wall_plan(wr, id, scale))
 				return true
+	*/
 
 }
 
@@ -600,8 +854,8 @@ function plan_bb(plan) {
 function face_bb(plan, vert) { // returns (x1, y1, x2, y2, min_depth, max_depth)
 	let [x1, y1, x2, y2] = plan_bb(plan)
 	let h = 0
-	for (let storey of plan.storeys)
-		h += storey.h
+	for (let level of plan.levels)
+		h += level.h
 	if (vert)
 		return [y1, 0, y2, h, x1, x2]
 	else
@@ -691,18 +945,21 @@ let PLAN_VIEW_STOREY = ui.S+1
 
 ui.box_widget('plan_view', {
 
-	create: function(cmd, id, plan, storey, fr, align, valign, min_w, min_h) {
+	create: function(cmd, id, plan, level, fr, align, valign, min_w, min_h) {
 
 		let [dstate, dx, dy] = ui.drag(id)
 
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
-		let cursors = {x: 'ew-resize', y: 'ns-resize'}
+
+		let lv = plan.levels[(level ?? 1)-1]
 
 		if (dstate == 'hover') {
-			let side = hs.get('side')
-			if (side)
-				ui.set_cursor(cursors[side])
+			let action = hs.get('action')
+
+			if (action == 'move_wall_v')
+				ui.set_cursor(hs.get('invert') ? 'row-resize' : 'col-resize')
+
 			let opening = hs.get('opening')
 			if (opening) {
 				let wr = hs.get('wall_run')
@@ -710,8 +967,26 @@ ui.box_widget('plan_view', {
 				let v = wall_vert(wr, i)
 				ui.set_cursor(cursors[v ? 'y' : 'x'])
 			}
+
 		}
 		if (dstate == 'drag') {
+
+			let action = hs.get('action')
+			if (action) {
+				cs.set('action', action)
+				if (action == 'move_wall_v') {
+					let xi     = hs.get('xi' )
+					let yi1    = hs.get('yi1')
+					let yi2    = hs.get('yi2')
+					let invert = hs.get('invert')
+					let xi1 = wall_v_start_move(plan, invert, lv, xi, yi1, yi2)
+					cs.set('xi'     , xi1)
+					cs.set('yi1'    , yi1)
+					cs.set('yi2'    , yi2)
+					cs.set('invert' , invert)
+				}
+			}
+
 			let side = hs.get('side')
 			if (side) {
 				let wr = hs.get('wall_run')
@@ -739,7 +1014,21 @@ ui.box_widget('plan_view', {
 				ui.set_cursor(cursors[v ? 'y' : 'x'])
 			}
 		}
+
 		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+
+			let action = cs.get('action')
+			if (action == 'move_wall_v') {
+				let xi     = cs.set('xi'     )
+				let yi1    = cs.set('yi1'    )
+				let yi2    = cs.set('yi2'    )
+				let invert = cs.set('invert' )
+
+				let xi1 = wall_v_move(plan, invert, lv, xi, invert ? dy : dx)
+				cs.set('xi', xi1)
+			}
+
+
 			let side = cs.get('side')
 			if (side) {
 				let wr = cs.get('wall_run')
@@ -779,8 +1068,20 @@ ui.box_widget('plan_view', {
 		}
 
 		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
-				id, plan, storey,
+				id, plan, level,
 			)
+	},
+
+	after_position: function(a, i, axis)	{
+		let plan = a[i+PLAN_VIEW_PLAN]
+		if (!axis) {
+			plan.max_scale = 1/0
+			return
+		}
+		let w    = a[i+2]
+		let h    = a[i+3]
+		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+		plan.max_scale = min(plan.max_scale, scale)
 	},
 
 	draw: function(a, i) {
@@ -791,9 +1092,13 @@ ui.box_widget('plan_view', {
 		let h      = a[i+3]
 		let id     = a[i+PLAN_VIEW_ID]
 		let plan   = a[i+PLAN_VIEW_PLAN]
-		let storey = a[i+PLAN_VIEW_STOREY]
+		let level = a[i+PLAN_VIEW_STOREY]
 
-		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+		// let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+		let scale = plan.max_scale
+		let [plan_x, plan_y] = plan_bb(plan)
+		plan_x = pix(plan_x, scale)
+		plan_y = pix(plan_y, scale)
 
 		let hs = ui.hit(id)
 
@@ -802,12 +1107,41 @@ ui.box_widget('plan_view', {
 		cx.save()
 
 		cx.translate(x00, y00)
-		cx.translate(-plan_x, -plan_y)
+		// cx.translate(-plan_x, -plan_y)
+
+		// draw grid walls
+		cx.beginPath()
+		let lv = plan.levels[(level ?? 1)-1]
+		for (let i = 0; i <= 1; i++) {
+			let xs  = i ? plan.ys : plan.xs
+			let ys  = i ? plan.xs : plan.ys
+			let walls_h = i ? lv.walls_v  : lv.walls_h
+			if (walls_h) {
+				for (let yi = 0, lines = walls_h, n = lines.length; yi < n; yi++) {
+					let y = pix(ys[yi], scale)
+					for (let xi = 0, a = lines[yi], n = a.length; xi < n; xi++) {
+						if (a[xi]) {
+							let x1 = pix(xs[xi+0], scale)
+							let x2 = pix(xs[xi+1], scale)
+							if (i) {
+								cx.moveTo(y, x1)
+								cx.lineTo(y, x2)
+							} else {
+								cx.moveTo(x1, y)
+								cx.lineTo(x2, y)
+							}
+						}
+					}
+				}
+			}
+		}
+		cx.strokeStyle = ui.fg_color('text')
+		cx.stroke()
 
 		// draw walls
 		for (let wr of plan.wall_runs) {
 
-			if ((wr.storey ?? 1) != (storey ?? 1))
+			if ((wr.level ?? 1) != (level ?? 1))
 				continue
 
 			begin_wall_path(cx, scale, wr)
@@ -822,7 +1156,7 @@ ui.box_widget('plan_view', {
 
 		}
 
-		let furniture = plan.storeys[storey-1].furniture
+		let furniture = plan.levels[level-1].furniture
 		if (furniture)
 			for (let e of furniture) {
 				let e_class = comp[e.type]
@@ -845,28 +1179,27 @@ ui.box_widget('plan_view', {
 		let h      = a[i+3]
 		let id     = a[i+PLAN_VIEW_ID]
 		let plan   = a[i+PLAN_VIEW_PLAN]
-		let storey = a[i+PLAN_VIEW_STOREY]
+		let level = a[i+PLAN_VIEW_STOREY]
 
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
 
 		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
 
-		if (!cs) {
+		if (cs)
+			return
 
-			let cx = ui.cx
+		let cx = ui.cx
 
-			cx.save()
-			cx.translate(x00, y00)
-			cx.translate(-plan_x, -plan_y)
-			ui.update_mouse()
+		//cx.save()
+		//cx.translate(x00, y00)
+		// cx.translate(-plan_x, -plan_y)
+		//ui.update_mouse()
 
-			hit_plan(plan, storey, id, scale)
+		hit_plan(plan, level, id, scale, x00, y00)
 
-			cx.restore()
-			ui.update_mouse()
-
-		}
+		//cx.restore()
+		//ui.update_mouse()
 
 	},
 
@@ -896,8 +1229,8 @@ function sort_face_walls(plan, face_vert, face_sign) {
 	return walls
 }
 
-function wall_face_rect(plan, storey, wr, i, scale) {
-	let h = pix(storey.h, scale)
+function wall_face_rect(plan, level, wr, i, scale) {
+	let h = pix(level.h, scale)
 	let v  = wall_vert(wr, i)
 	let p1 = wall_p1(wr, i+0, true, null, scale)
 	let p2 = wall_p1(wr, i+1, true, null, scale)
@@ -911,14 +1244,14 @@ function wall_face_rect(plan, storey, wr, i, scale) {
 	return [x, y, w, h, p1[Y]] // (x, y, w, h, z)
 }
 
-function hit_opening_face(plan, storey, wr, i, id, scale) {
+function hit_opening_face(plan, level, wr, i, id, scale) {
 
 	let wall = wr.walls[i]
 	if (!wall.openings)
 		return
 	for (let op of wall.openings) {
 
-		let [x, y, w, h, rotation] = opening_face_rect(op, wr, i, storey, scale)
+		let [x, y, w, h, rotation] = opening_face_rect(op, wr, i, level, scale)
 
 		let cx = ui.cx
 		cx.save()
@@ -936,8 +1269,8 @@ function hit_opening_face(plan, storey, wr, i, id, scale) {
 	}
 }
 
-function hit_wall_face(plan, storey, wr, i, id, scale) {
-	let [x, y, w, h] = wall_face_rect(plan, storey, wr, i, scale)
+function hit_wall_face(plan, level, wr, i, id, scale) {
+	let [x, y, w, h] = wall_face_rect(plan, level, wr, i, scale)
 	if (ui.hit_rect(x, y, w, h)) {
 		let hs = ui.hover(id)
 		//hs.set('wall_run', wr)
@@ -947,13 +1280,13 @@ function hit_wall_face(plan, storey, wr, i, id, scale) {
 	}
 }
 
-function hit_face(plan, storey, storey_num, walls, id, scale, transparent_walls) {
+function hit_face(plan, level, level_num, walls, id, scale, transparent_walls) {
 	for (let [wr, i] of walls) {
-		if ((wr.storey ?? 1) != storey_num)
+		if ((wr.level ?? 1) != level_num)
 			continue
-		if (hit_opening_face(plan, storey, wr, i, id, scale))
+		if (hit_opening_face(plan, level, wr, i, id, scale))
 			return true
-		if (!transparent_walls && hit_wall_face(plan, storey, wr, i, id, scale))
+		if (!transparent_walls && hit_wall_face(plan, level, wr, i, id, scale))
 			return true
 	}
 }
@@ -1061,20 +1394,20 @@ ui.box_widget('face_view', {
 
 		let walls = sort_face_walls(plan, face_vert, face_sign)
 
-		for (let storey_num = plan.storeys.length; storey_num >= 1; storey_num--) {
+		for (let level_num = plan.levels.length; level_num >= 1; level_num--) {
 
-			let storey = plan.storeys[storey_num-1]
-			let h = pix(storey.h, scale)
+			let level = plan.levels[level_num-1]
+			let h = pix(level.h, scale)
 
 			// draw walls (offset face) in depth order.
 			let X = face_vert ? 1 : 0
 			let Y = face_vert ? 0 : 1
 			for (let [wr, i] of walls) {
 
-				if ((wr.storey ?? 1) != storey_num)
+				if ((wr.level ?? 1) != level_num)
 					continue
 
-				let [x, y, w, h, z] = wall_face_rect(plan, storey, wr, i, scale)
+				let [x, y, w, h, z] = wall_face_rect(plan, level, wr, i, scale)
 
 				let depth = lerp(z, min_depth * scale, max_depth * scale, 0, 1)
 
@@ -1094,7 +1427,7 @@ ui.box_widget('face_view', {
 				if (ops) {
 					for (let op of ops) {
 
-						let [x, y, w, h] = opening_face_rect(op, wr, i, storey, scale)
+						let [x, y, w, h] = opening_face_rect(op, wr, i, level, scale)
 
 						cx.save()
 						cx.translate(x, y)
@@ -1153,14 +1486,14 @@ ui.box_widget('face_view', {
 			walls.reverse()
 
 			let y = 0
-			for (let storey_num = plan.storeys.length; storey_num >= 1; storey_num--) {
+			for (let level_num = plan.levels.length; level_num >= 1; level_num--) {
 
-				let storey = plan.storeys[storey_num-1]
+				let level = plan.levels[level_num-1]
 
-				if (hit_face(plan, storey, storey_num, walls, id, scale, true))
+				if (hit_face(plan, level, level_num, walls, id, scale, true))
 					break
 
-				y += pix(storey.h, scale)
+				y += pix(level.h, scale)
 				cx.translate(0, y)
 				ui.update_mouse()
 			}
@@ -1187,6 +1520,7 @@ comp.table.plan_rect = function(e, scale) {
 }
 
 comp.table.draw_plan = function(cx, e, w, h, hs) {
+	cx.beginPath()
 	cx.rect(.5, .5, w, h)
 	cx.strokeStyle = ui.fg_color('text')
 	cx.stroke()
@@ -1203,6 +1537,7 @@ comp.bed.plan_rect = function(e, scale) {
 }
 
 comp.bed.draw_plan = function(cx, e, w, h, hs) {
+	cx.beginPath()
 	cx.rect(.5, .5, w, h)
 	cx.strokeStyle = ui.fg_color('text')
 	cx.stroke()
@@ -1275,8 +1610,13 @@ ui.box_widget('comps', {
 // test plan -----------------------------------------------------------------
 
 let plan = {
-	storeys: [
-		{h: 80,},
+	xs: [0, 100, 200],
+	ys: [0, 75, 150, 300],
+	levels: [
+		{h: 80,
+			walls_h: [[1,0],[1,1],[1,1],[1,1],],
+			walls_v: [[1,1,1],[0,0,1],[1,1,1],],
+		},
 		{h: 80, furniture: [
 			{type: 'table', x: 10, y: 100},
 			{type: 'bed'  , x: 10, y: 200},
@@ -1284,28 +1624,7 @@ let plan = {
 	],
 	wall_runs: [
 		{
-			exterior: true,
-			closed: true,
-			thickness: 5,
-			walls: [
-				{to: 100,},
-				{to: 100,},
-				{to: 200, openings: [
-					{type: 'window', d: 30, w: 50, h: 50, y: 20},
-				]},
-				{to: 200,},
-				{to: 100, openings: [
-					{type: 'door', d: 20, w: 50, h: 70},
-				]},
-				{to: 300,},
-				{to: 150,},
-				{to: 400,},
-				{to:   0,},
-				{to:   0,},
-			],
-		},
-		{
-			storey: 2,
+			level: 2,
 			exterior: true,
 			closed: true,
 			thickness: 5,
@@ -1329,17 +1648,14 @@ let plan = {
 			],
 		},
 		{
-			h: 80,
-			thickness: 3,
+			level: 2,
+			thickness: 13,
 			offset_sign: 1,
-			vertical: true,
 			walls: [
-				{to: 150},
-				{to: 0, openings: [
-					{type: 'door', d: 10, w: 40, h: 70, swing: 45},
-				]},
-				{to: 100}, // y0
-				{to: 100}, // x0
+				{to: 100}, // x1
+				{to: 350}, // y0
+				{to:  50}, // x0
+				{to: 350},
 			],
 		},
 	],
@@ -1354,11 +1670,11 @@ ui.main = function() {
 
 		ui.v()
 
-			for (let storey = plan.storeys.length; storey >= 1; storey--) {
+			for (let level = plan.levels.length; level >= 1; level--) {
 				ui.m(10)
 				ui.stack()
 					ui.bb('', null, null, 1, 'light')
-					ui.plan_view('pv'+storey, plan, storey)
+					ui.plan_view('pv'+level, plan, level)
 				ui.end_stack()
 			}
 

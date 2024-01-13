@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html theme=dark>
+<body>
+<base href="www2/">
+<link rel="preload" href="fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
+<script src=glue.js global extend></script>
+<script src=ui.js></script>
+<script src=ui_validation.js></script>
+<script src=ui_nav.js></script>
+<script src=ui_grid.js></script>
+<script>
+
+(function () {
+"use strict"
+const G = window
+
+let EPSILON = 1e-5
+
+function near(a, b) { return abs(a - b) < EPSILON }
+
+function pix(x, scale) {
+	return (scale ?? 1) == 1 ? x : round(x * scale)
+}
+
+// plan view widget ----------------------------------------------------------
+
+let PLAN_VIEW_ID     = ui.S-1
+let PLAN_VIEW_PLAN   = ui.S+0
+let PLAN_VIEW_STOREY = ui.S+1
+
+ui.box_widget('plan_view', {
+
+	create: function(cmd, id, plan, storey, fr, align, valign, min_w, min_h) {
+
+		let [dstate, dx, dy] = ui.drag(id)
+
+		let hs = ui.hovers(id)
+		let cs = ui.captured(id)
+		let cursors = {x: 'ew-resize', y: 'ns-resize'}
+
+		/*
+		if (dstate == 'hover') {
+			let side = hs.get('side')
+			if (side)
+				ui.set_cursor(cursors[side])
+			let opening = hs.get('opening')
+			if (opening) {
+				let wr = hs.get('wall_run')
+				let i  = hs.get('pi')
+				let v = wall_vert(wr, i)
+				ui.set_cursor(cursors[v ? 'y' : 'x'])
+			}
+		}
+		if (dstate == 'drag') {
+			let side = hs.get('side')
+			if (side) {
+				let wr = hs.get('wall_run')
+				let pi = hs.get('pi')
+				ui.set_cursor(cursors[side])
+				let joints = wall_joints(plan, wr, pi)
+				cs.set('side'  , side)
+				cs.set('pi'    , pi)
+				cs.set('px0'   , wall_x1(wr, pi))
+				cs.set('py0'   , wall_y1(wr, pi))
+				cs.set('joints', joints)
+				cs.set('rs'    , moving_ranges(plan, wr, pi, joints))
+			}
+			let op = hs.get('opening')
+			if (op) {
+				let wr = hs.get('wall_run')
+				let i  = hs.get('pi')
+				let v = wall_vert(wr, i)
+				let ranges = opening_move_ranges(op, plan)
+				cs.set('opening'     , op)
+				cs.set('wall_run'    , wr)
+				cs.set('pi'          , i)
+				cs.set('d0'          , op.d)
+				cs.set('move_ranges' , ranges)
+				ui.set_cursor(cursors[v ? 'y' : 'x'])
+			}
+		}
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+			let side = cs.get('side')
+			if (side) {
+				let wr = cs.get('wall_run')
+				let pi = cs.get('pi')
+				let rs = cs.get('rs')
+				let joints = cs.get('joints')
+				ui.set_cursor(cursors[side])
+				let X = side == 'x' ? 0 : 1
+				let dX = X ? dy : dx
+				let pX = cs.get(X ? 'py0' : 'px0') + dX
+				let r = rs[0]
+				pX = clamp(pX, r[0], r[1])
+
+				wall_set_Y(wr, pi, pX)
+
+				for (let joint of joints)
+					joint.update()
+			}
+			let op = cs.get('opening')
+			if (op) {
+				let wr = cs.get('wall_run')
+				let i  = cs.get('pi')
+				let v  = wall_vert(wr, i)
+				let s  = wall_sign(wr, i)
+				let d0 = cs.get('d0')
+				let ranges = cs.get('move_ranges')
+				ui.set_cursor(cursors[v ? 'y' : 'x'])
+				let scale = 1 // TODO
+				let d = d0 + s * (v ? dy : dx) / scale
+				for (let [wr1, i1, min_d, max_d] of ranges) {
+					if (wr1 == wr && i1 == i) {
+						op.d = clamp(d, min_d, max_d)
+						break
+					}
+				}
+			}
+		}
+		*/
+
+		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
+				id, plan, storey,
+			)
+	},
+
+	/*
+	after_position: function(a, i, axis)	{
+		let plan = a[i+PLAN_VIEW_PLAN]
+		if (!axis) {
+			plan.max_scale = 1/0
+			return
+		}
+		let w    = a[i+2]
+		let h    = a[i+3]
+		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+		plan.max_scale = min(plan.max_scale, scale)
+	},
+	*/
+
+	draw: function(a, i) {
+
+		let x00    = a[i+0]
+		let y00    = a[i+1]
+		let w      = a[i+2]
+		let h      = a[i+3]
+		let id     = a[i+PLAN_VIEW_ID]
+		let plan   = a[i+PLAN_VIEW_PLAN]
+		let storey = a[i+PLAN_VIEW_STOREY]
+
+		/*
+		// let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+		let scale = plan.max_scale
+		let [plan_x, plan_y] = plan_bb(plan)
+		plan_x = pix(plan_x, scale)
+		plan_y = pix(plan_y, scale)
+
+		let hs = ui.hit(id)
+
+		let cx = ui.cx
+
+		cx.save()
+
+		cx.translate(x00, y00)
+		cx.translate(-plan_x, -plan_y)
+
+		// draw walls
+		for (let wr of plan.wall_runs) {
+
+			if ((wr.storey ?? 1) != (storey ?? 1))
+				continue
+
+			begin_wall_path(cx, scale, wr)
+
+			//cx.lineWidth = 1
+			// cx.strokeStyle = ui.fg_color('text')
+			// cx.stroke()
+			cx.fillStyle = ui.bg_color('bg3')
+			cx.fill()
+
+			draw_wall_openings(cx, scale, wr, hs)
+
+		}
+
+		let furniture = plan.storeys[storey-1].furniture
+		if (furniture)
+			for (let e of furniture) {
+				let e_class = comp[e.type]
+				let [x0, y0, w, h] = e_class.plan_rect(e, scale)
+				cx.save()
+				cx.translate(x0, y0)
+				e_class.draw_plan(cx, e, w, h)
+				cx.restore()
+			}
+
+		cx.restore()
+		*/
+	},
+
+	hit: function(a, i) {
+
+		let x00    = a[i+0]
+		let y00    = a[i+1]
+		let w      = a[i+2]
+		let h      = a[i+3]
+		let id     = a[i+PLAN_VIEW_ID]
+		let plan   = a[i+PLAN_VIEW_PLAN]
+		let storey = a[i+PLAN_VIEW_STOREY]
+
+		let hs = ui.hovers(id)
+		let cs = ui.captured(id)
+
+		/*
+		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
+
+		if (!cs) {
+
+			let cx = ui.cx
+
+			cx.save()
+			cx.translate(x00, y00)
+			cx.translate(-plan_x, -plan_y)
+			ui.update_mouse()
+
+			hit_plan(plan, storey, id, scale)
+
+			cx.restore()
+			ui.update_mouse()
+
+		}
+		*/
+
+	},
+
+})
+
+// test plan -----------------------------------------------------------------
+
+let plan = {
+	storeys: [
+		{h: 2.5,},
+		walls_h: [[1,0],[1,1],[1,1],],
+		walls_v: [[1,1],[0,1],[1,1],],
+	],
+	grid_x: [0, 7],
+	grid_y: [0, 9],
+}
+
+// test UI --------------------------------------------------------------------
+
+ui.main = function() {
+
+	ui.m(100)
+	ui.h()
+
+		ui.v()
+
+			for (let storey = plan.storeys.length; storey >= 1; storey--) {
+				ui.m(10)
+				ui.stack()
+					ui.bb('', null, null, 1, 'light')
+					ui.plan_view('pv'+storey, plan, storey)
+				ui.end_stack()
+			}
+
+		ui.end_v()
+
+	ui.end_h()
+}
+
+}()) // module function
+
+</script>
+</body>
+</html>

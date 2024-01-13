@@ -10,9 +10,6 @@
 - TODO: drag-move opening:
 	- TODO: pick the closest wall
 		- go outside walls if no wall is close enough
-	- TODO: pick the closest free range and clamp to it.
-
-- TODO: drag-move opening:
 
 - drag opening:
 	- constrain position to free space when moving and resizing
