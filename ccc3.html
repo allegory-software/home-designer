@@ -15,258 +15,374 @@
 "use strict"
 const G = window
 
-let EPSILON = 1e-5
+let clone = structuredClone
 
-function near(a, b) { return abs(a - b) < EPSILON }
+// test plan -----------------------------------------------------------------
 
-function pix(x, scale) {
-	return (scale ?? 1) == 1 ? x : round(x * scale)
+let ps = [
+	[0,0],
+	[500,0],
+	[500,500],
+	[0,500],
+	[0,300],
+	[500,300],
+	[0,200],
+	[500,200],
+]
+
+let segs = [
+	{ps: [0,1]},
+	{ps: [1,2]},
+	{ps: [2,3]},
+	{ps: [3,0]},
+	{ps: [4,5]},
+	{ps: [6,7]},
+]
+
+function add_seg_ref(p, seg) {
+	if (!p.segs)
+		p.segs = []
+	p.segs.push(seg)
 }
 
-// plan view widget ----------------------------------------------------------
+function load_plan() {
+	for (let seg of segs) {
+		seg.ps[0] = ps[seg.ps[0]]
+		seg.ps[1] = ps[seg.ps[1]]
+		add_seg_ref(seg.ps[0], seg)
+		add_seg_ref(seg.ps[1], seg)
+	}
+}
 
-let PLAN_VIEW_ID     = ui.S-1
-let PLAN_VIEW_PLAN   = ui.S+0
-let PLAN_VIEW_STOREY = ui.S+1
+function is_h(seg) { let ps = seg.ps; return ps[0][1] == ps[1][1] }
+function is_v(seg) { let ps = seg.ps; return ps[0][0] == ps[1][0] }
+function is_zero(seg) { return is_h(seg) && is_v(seg) }
 
-ui.box_widget('plan_view', {
+function seg_x1(seg) { let ps = seg.ps; return min(ps[0][0], ps[1][0]) }
+function seg_y1(seg) { let ps = seg.ps; return min(ps[0][1], ps[1][1]) }
+function seg_x2(seg) { let ps = seg.ps; return max(ps[0][0], ps[1][0]) }
+function seg_y2(seg) { let ps = seg.ps; return max(ps[0][1], ps[1][1]) }
 
-	create: function(cmd, id, plan, storey, fr, align, valign, min_w, min_h) {
+function add_point(x, y) {
+	let p = [x, y]
+	p.segs = []
+	ps.push(p)
+	return p
+}
 
-		let [dstate, dx, dy] = ui.drag(id)
+function add_seg(p1, p2) {
+	let seg = {ps: [p1, p2]}
+	segs.push(seg)
+	add_seg_ref(p1, seg)
+	add_seg_ref(p2, seg)
+	return seg
+}
 
-		let hs = ui.hovers(id)
-		let cs = ui.captured(id)
-		let cursors = {x: 'ew-resize', y: 'ns-resize'}
+function break_seg(seg, xy) {
+	if (is_v(seg)) {
+		let y = xy
+		let y1 = seg_y1(seg)
+		let y2 = seg_y2(seg)
+		let x  = seg_x1(seg)
+		if (y == y1 || y == y2)
+			return
+		seg.removed = true
+		add_seg(add_point(x, y1), add_point(x, y))
+		add_seg(add_point(x, y2), add_point(x, y))
+	} else {
+		let x = xy
+		let x1 = seg_x1(seg)
+		let x2 = seg_x2(seg)
+		let y  = seg_y1(seg)
+		if (x == x1 || x == x2)
+			return
+		seg.removed = true
+		add_seg(add_point(x1, y), add_point(x, y))
+		add_seg(add_point(x2, y), add_point(x, y))
+	}
+}
 
-		/*
-		if (dstate == 'hover') {
-			let side = hs.get('side')
-			if (side)
-				ui.set_cursor(cursors[side])
-			let opening = hs.get('opening')
-			if (opening) {
-				let wr = hs.get('wall_run')
-				let i  = hs.get('pi')
-				let v = wall_vert(wr, i)
-				ui.set_cursor(cursors[v ? 'y' : 'x'])
-			}
-		}
-		if (dstate == 'drag') {
-			let side = hs.get('side')
-			if (side) {
-				let wr = hs.get('wall_run')
-				let pi = hs.get('pi')
-				ui.set_cursor(cursors[side])
-				let joints = wall_joints(plan, wr, pi)
-				cs.set('side'  , side)
-				cs.set('pi'    , pi)
-				cs.set('px0'   , wall_x1(wr, pi))
-				cs.set('py0'   , wall_y1(wr, pi))
-				cs.set('joints', joints)
-				cs.set('rs'    , moving_ranges(plan, wr, pi, joints))
-			}
-			let op = hs.get('opening')
-			if (op) {
-				let wr = hs.get('wall_run')
-				let i  = hs.get('pi')
-				let v = wall_vert(wr, i)
-				let ranges = opening_move_ranges(op, plan)
-				cs.set('opening'     , op)
-				cs.set('wall_run'    , wr)
-				cs.set('pi'          , i)
-				cs.set('d0'          , op.d)
-				cs.set('move_ranges' , ranges)
-				ui.set_cursor(cursors[v ? 'y' : 'x'])
-			}
-		}
-		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
-			let side = cs.get('side')
-			if (side) {
-				let wr = cs.get('wall_run')
-				let pi = cs.get('pi')
-				let rs = cs.get('rs')
-				let joints = cs.get('joints')
-				ui.set_cursor(cursors[side])
-				let X = side == 'x' ? 0 : 1
-				let dX = X ? dy : dx
-				let pX = cs.get(X ? 'py0' : 'px0') + dX
-				let r = rs[0]
-				pX = clamp(pX, r[0], r[1])
+function segs_intersect(seg1, seg2) {
+	if (is_h(seg1))
+		[seg1, seg2] = [seg2, seg1]
 
-				wall_set_Y(wr, pi, pX)
+	let y1 = seg_y1(seg1)
+	let y2 = seg_y2(seg1)
+	let x  = seg_x1(seg1)
 
-				for (let joint of joints)
-					joint.update()
-			}
-			let op = cs.get('opening')
-			if (op) {
-				let wr = cs.get('wall_run')
-				let i  = cs.get('pi')
-				let v  = wall_vert(wr, i)
-				let s  = wall_sign(wr, i)
-				let d0 = cs.get('d0')
-				let ranges = cs.get('move_ranges')
-				ui.set_cursor(cursors[v ? 'y' : 'x'])
-				let scale = 1 // TODO
-				let d = d0 + s * (v ? dy : dx) / scale
-				for (let [wr1, i1, min_d, max_d] of ranges) {
-					if (wr1 == wr && i1 == i) {
-						op.d = clamp(d, min_d, max_d)
+	let x1 = seg_x1(seg2)
+	let x2 = seg_x2(seg2)
+	let y  = seg_y1(seg2)
+
+	return x >= x1 && x <= x2 && y >= y1 && y <= y2
+}
+
+function segs_perpendicular(seg1, seg2) {
+	let v1 = is_v(seg1)
+	let h1 = is_h(seg1)
+	let v2 = is_v(seg2)
+	let h2 = is_h(seg2)
+	return (v1 && h2) || (h1 && v2)
+}
+
+function seg_axis(seg) {
+	return is_v(seg) ? seg_x1(seg) : seg_y1(seg)
+}
+
+function break_intersecting_segs(seg1, seg2) {
+	if (!segs_perpendicular(seg1, seg2))
+		return
+	if (!segs_intersect(seg1, seg2))
+		return
+	break_seg(seg1, seg_axis(seg2))
+}
+
+function break_all_intersecting_segs_on(v) {
+	for (let seg1 of segs) {
+		if (is_v(seg1) == v) {
+			for (let seg2 of segs) {
+				if (is_v(seg2) != v) {
+					break_intersecting_segs(seg1, seg2)
+					if (seg1.removed)
 						break
-					}
 				}
 			}
 		}
-		*/
+	}
+	remove_values(segs, seg => seg.removed)
+}
 
-		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
-				id, plan, storey,
-			)
-	},
+function points_cmp(p1, p2) {
+	if (p1[0] < p2[0]) return -1
+	if (p1[0] > p2[0]) return  1
+	if (p1[1] < p2[1]) return -1
+	if (p1[1] > p2[1]) return  1
+	return 0
+}
 
-	/*
-	after_position: function(a, i, axis)	{
-		let plan = a[i+PLAN_VIEW_PLAN]
-		if (!axis) {
-			plan.max_scale = 1/0
-			return
+function deduplicate_points() {
+	ps.sort(points_cmp)
+	let p0
+	for (let i = 0; i < ps.length;) {
+		let p = ps[i]
+		if (p0 && !points_cmp(p, p0)) {
+			for (let seg of segs) {
+				for (let i = 0; i < 2; i++) {
+					if (seg.ps[i] == p) {
+						seg.ps[i] = p0
+						add_seg_ref(p0, seg)
+					}
+				}
+			}
+			remove(ps, i)
+			continue
 		}
-		let w    = a[i+2]
-		let h    = a[i+3]
-		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
-		plan.max_scale = min(plan.max_scale, scale)
+		p0 = p
+		i++
+	}
+}
+
+function break_colinear_segs() {
+	segs.sort(function(s1, s2) {
+		let v1 = is_v(s1)
+		let v2 = is_v(s2)
+		// level 1 grouping by direction
+		if (v1 < v2) return -1
+		if (v1 > v2) return  1
+		let m1 = seg_axis(s1)
+		let m2 = seg_axis(s2)
+		// level 2 grouping by axis
+		if (m1 < m2) return -1
+		if (m1 > m2) return  1
+		// level 3 grouping by starting point
+		let i = v1 ? 1 : 0
+		let c1 = min(s1.ps[0][i], s1.ps[1][i])
+		let c2 = min(s2.ps[0][i], s2.ps[0][i])
+		if (c1 < c2) return -1
+		if (c1 > c2) return  1
+		return 0
+	})
+	let i0, v0, m0
+	let i = 0
+	let n = segs.length
+	for (let seg of segs) {
+		let v = is_v(seg)
+		let m = seg_axis(seg)
+		if (v0 == null) {
+			i0 = i
+			v0 = v
+			m0 = m
+		} else if (v != v0 || m != m0) {
+			if (i-1 > i0) { // at least 2 colinear segments
+				let seg_m1 = v ? seg_y1 : seg_x1
+				let seg_m2 = v ? seg_y2 : seg_x2
+				let overlap
+				for (let j = i0+1; j < i; j++) {
+					if (seg_m1(segs[j]) < seg_m2(segs[j-1])) {
+						overlap = true
+						break
+					}
+				}
+				if (overlap) {
+					pr('overlap', i0, i-1, json(segs.slice(i0, i)))
+				}
+			}
+			i0 = i
+			v0 = v
+			m0 = m
+		}
+		i++
+		if (i == n) break // skip just-added segs
+	}
+}
+
+function remove_zero_segs() {
+	remove_values(segs, is_zero)
+}
+
+function fix_plan() {
+	for (let v = 0; v <= 1; v++)
+		break_all_intersecting_segs_on(!!v)
+	break_colinear_segs()
+	deduplicate_points()
+	remove_zero_segs()
+}
+
+function break_seg_p(seg, i) {
+	let p = seg.ps[i]
+	let new_p = add_point(p[0], p[1])
+	seg.ps[i] = new_p
+	return add_seg(p, new_p)
+}
+
+function detach_colinear_segs(seg) {
+	let v = is_v(seg)
+	for (let i = 0; i < 2; i++) {
+		for (let seg1 of seg.ps[i].segs) {
+			if (seg1 == seg)
+				continue
+			if (is_v(seg1) != v)
+				continue
+			if (is_zero(seg1)) // just added
+				continue
+			let p1 = seg .ps[0]
+			let p2 = seg .ps[1]
+			let q1 = seg1.ps[0]
+			let q2 = seg1.ps[1]
+			if (p1 == q1 || p2 == q1) break_seg_p(seg1, 0)
+			if (p1 == q2 || p2 == q2) break_seg_p(seg1, 1)
+		}
+	}
+}
+
+function start_move_seg(seg) {
+	detach_colinear_segs(seg)
+}
+
+load_plan()
+fix_plan()
+
+// test UI --------------------------------------------------------------------
+
+ui.widget('bla', {
+
+	create: function(cmd, id) {
+
+		let [dstate, dx, dy] = ui.drag(id)
+
+		if (dstate == 'drag') {
+			let hs = ui.hover(id)
+			if (hs) {
+				let seg = hs.get('seg')
+				if (seg) {
+					let cs = ui.captured(id)
+					start_move_seg(seg)
+					cs.set('seg', seg)
+					cs.set('seg0', clone(seg))
+				}
+			}
+		}
+
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+			let cs = ui.captured(id)
+			if (cs) {
+				let seg  = cs.get('seg')
+				let seg0 = cs.get('seg0')
+				if (is_v(seg0)) {
+					seg.ps[0][0] = seg0.ps[0][0] + dx
+					seg.ps[1][0] = seg0.ps[1][0] + dx
+				} else {
+					seg.ps[0][1] = seg0.ps[0][1] + dy
+					seg.ps[1][1] = seg0.ps[1][1] + dy
+				}
+			}
+		}
+
+		if (dstate == 'drop') {
+			fix_plan()
+		}
+
+		ui.cmd(cmd, id)
 	},
-	*/
 
 	draw: function(a, i) {
 
-		let x00    = a[i+0]
-		let y00    = a[i+1]
-		let w      = a[i+2]
-		let h      = a[i+3]
-		let id     = a[i+PLAN_VIEW_ID]
-		let plan   = a[i+PLAN_VIEW_PLAN]
-		let storey = a[i+PLAN_VIEW_STOREY]
+		let id = a[i+0]
 
-		/*
-		// let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
-		let scale = plan.max_scale
-		let [plan_x, plan_y] = plan_bb(plan)
-		plan_x = pix(plan_x, scale)
-		plan_y = pix(plan_y, scale)
-
-		let hs = ui.hit(id)
+		let hs = ui.hovers(id)
 
 		let cx = ui.cx
-
 		cx.save()
-
-		cx.translate(x00, y00)
-		cx.translate(-plan_x, -plan_y)
-
-		// draw walls
-		for (let wr of plan.wall_runs) {
-
-			if ((wr.storey ?? 1) != (storey ?? 1))
-				continue
-
-			begin_wall_path(cx, scale, wr)
-
-			//cx.lineWidth = 1
-			// cx.strokeStyle = ui.fg_color('text')
-			// cx.stroke()
-			cx.fillStyle = ui.bg_color('bg3')
-			cx.fill()
-
-			draw_wall_openings(cx, scale, wr, hs)
-
+		cx.translate(.5, .5)
+		let hit_seg = hs && hs.get('seg')
+		for (let seg of segs) {
+			let p1 = seg.ps[0]
+			let p2 = seg.ps[1]
+			cx.beginPath()
+			cx.moveTo(...p1)
+			cx.lineTo(...p2)
+			cx.strokeStyle = hit_seg == seg ? 'white' : 'gray'
+			cx.stroke()
 		}
-
-		let furniture = plan.storeys[storey-1].furniture
-		if (furniture)
-			for (let e of furniture) {
-				let e_class = comp[e.type]
-				let [x0, y0, w, h] = e_class.plan_rect(e, scale)
-				cx.save()
-				cx.translate(x0, y0)
-				e_class.draw_plan(cx, e, w, h)
-				cx.restore()
-			}
-
 		cx.restore()
-		*/
+
 	},
 
 	hit: function(a, i) {
 
-		let x00    = a[i+0]
-		let y00    = a[i+1]
-		let w      = a[i+2]
-		let h      = a[i+3]
-		let id     = a[i+PLAN_VIEW_ID]
-		let plan   = a[i+PLAN_VIEW_PLAN]
-		let storey = a[i+PLAN_VIEW_STOREY]
+		let id = a[i+0]
 
-		let hs = ui.hovers(id)
-		let cs = ui.captured(id)
-
-		/*
-		let [scale, plan_x, plan_y] = plan_scale(plan, w, h)
-
-		if (!cs) {
-
-			let cx = ui.cx
-
-			cx.save()
-			cx.translate(x00, y00)
-			cx.translate(-plan_x, -plan_y)
-			ui.update_mouse()
-
-			hit_plan(plan, storey, id, scale)
-
-			cx.restore()
-			ui.update_mouse()
-
+		for (let seg of segs) {
+			let p1 = seg.ps[0]
+			let p2 = seg.ps[1]
+			let x1 = min(p1[0], p2[0])
+			let y1 = min(p1[1], p2[1])
+			let x2 = max(p1[0], p2[0])
+			let y2 = max(p1[1], p2[1])
+			if (y1 == y2) {
+				y1 -= 5
+				y2 += 5
+			} else if (x1 == x2) {
+				x1 -= 5
+				x2 += 5
+			} else {
+				continue
+			}
+			if (ui.hit_rect(x1, y1, x2-x1, y2-y1)) {
+				let hs = ui.hover(id)
+				hs.set('seg', seg)
+				break
+			}
 		}
-		*/
 
 	},
 
 })
 
-// test plan -----------------------------------------------------------------
-
-let plan = {
-	storeys: [
-		{h: 2.5,},
-		walls_h: [[1,0],[1,1],[1,1],],
-		walls_v: [[1,1],[0,1],[1,1],],
-	],
-	grid_x: [0, 7],
-	grid_y: [0, 9],
-}
-
-// test UI --------------------------------------------------------------------
-
 ui.main = function() {
 
-	ui.m(100)
-	ui.h()
+	ui.bla('b1')
 
-		ui.v()
-
-			for (let storey = plan.storeys.length; storey >= 1; storey--) {
-				ui.m(10)
-				ui.stack()
-					ui.bb('', null, null, 1, 'light')
-					ui.plan_view('pv'+storey, plan, storey)
-				ui.end_stack()
-			}
-
-		ui.end_v()
-
-	ui.end_h()
 }
 
 }()) // module function
