@@ -21,7 +21,7 @@
 		len[2] set_len normalize
 		add adds sub subs negate mul muls div divs min max dot cross
 		angle_to distance[2]_to
-		transform(mat3|mat4|quaternion) rotate project
+		transform(mat3|mat4|quat) rotate project
 		origin zero one up right x|y|z_axis black white
 
 	v4 [x, y, z, w]
@@ -2738,11 +2738,11 @@ poly3p.center = function(out) {
 //   "An optimal algorithm for extracting the regions of a plane graph"
 //   X.Y. Jiang and H. Bunke, 1992.
 
-// return a number from the range [0..4] which is monotonic
-// in the angle that the input vector makes against the x axis.
+// return a number from the range [0..4) which is monotonically increasing
+// with the clockwise angle that the input vector makes against the x axis.
 function v2_pseudo_angle(dx, dy) {
-	let p = dx / (abs(dx) + abs(dy))  // -1..1 increasing with x
-	return dy < 0 ? 3 + p : 1 - p     //  2..4 or 0..2 increasing with x
+	let p = dx / (abs(dx) + abs(dy))  // -1..0 (x <= 0) or 0..1 (x >= 0)
+	return dy < 0 ? 3 + p : 1 - p     //  2..4 (y <= 0) or 0..2 (y >= 0)
 }
 
 poly3_class.regions = function() {

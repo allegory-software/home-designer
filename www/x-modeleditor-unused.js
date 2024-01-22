@@ -116,3 +116,17 @@
 
 	}
 
+
+// "2D cross-product" aka "perp dot product" (dot-perp):
+// it's the length of the cross-product vector where a, b are points on the 3D xy plane with z=0.
+// it's also the dot-product of the _|_ of a (rotated ccw 90deg) and b.
+// it's also the area of the parallelogram between a, b (and it's signed).
+// its sign tells if rotating from a to b is clockwise (+ is cw, - is ccw).
+// its sign also tells, if you place b on top of a, if you have to turn right (-)
+// or left (+) to get from a to b, or if a and b are collinear (0).
+// A polygon is convex if all perp_dots are (+) or (-).
+// See: http://www.sunshine2k.de/articles/Notes_PerpDotProduct_R2.pdf
+function dot_perp(a, b) {
+	return a[0] * b[1] - a[1] * b[0]
+}
+
