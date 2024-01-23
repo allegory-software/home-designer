@@ -98,12 +98,6 @@ G.ps = ps
 G.segs = segs
 G.cycles = cycles
 
-// 2D math -------------------------------------------------------------------
-
-function adj_point(seg, p) {
-	return assert(seg.ps[seg.ps[0] == p ? 1 : seg.ps[1] == p ? 0 : -1])
-}
-
 // model editing -------------------------------------------------------------
 
 function is_h(seg) { let ps = seg.ps; return ps[0][1] == ps[1][1] }
@@ -128,6 +122,10 @@ function set_seg_m1(seg, m) { if (is_v(seg)) set_seg_y1(seg, m); else set_seg_x1
 function set_seg_m2(seg, m) { if (is_v(seg)) set_seg_y2(seg, m); else set_seg_x2(seg, m) }
 
 function points_equal(p1, p2) { return p1[0] == p2[0] && p1[1] == p2[1] }
+
+function adj_point(seg, p) {
+	return assert(seg.ps[seg.ps[0] == p ? 1 : seg.ps[1] == p ? 0 : -1])
+}
 
 function init_point(p, i) {
 	p.segs = []
@@ -156,7 +154,7 @@ function rem_points(cond, log) {
 		return true
 	})
 	if (log && a.length)
-		check(false, '{0}: {1}', isstr(log) ? log : 'points removed', a.join(','))
+		check(false, '{0}: {1}', isstr(log) ? log : 'points removed', a.join(' '))
 }
 
 function add_seg_ref(p, seg) {
@@ -442,7 +440,7 @@ function rebuild_adj_refs() {
 
 	if (0 && DEBUG_PLAN)
 	for (let p of ps)
-		log('adj {0}: {1}', p.i, p.adj.map(p => p.i).join(','))
+		log('adj {0}: {1}', p.i, p.adj.map(p => p.i).join(' '))
 }
 
 // finding graph components --------------------------------------------------
@@ -477,7 +475,7 @@ function find_comps() {
 			comps.push(comp)
 			dfs(p, comp.ps, segs)
 			comp.segs = set_toarray(segs)
-			log('comp {0}: {1}', comp.i, comp.ps.map(p=>p.i).join(','))
+			log('comp {0}: {1}', comp.i, comp.ps.map(p=>p.i).join(' '))
 		}
 	}
 
@@ -581,7 +579,8 @@ function pseudo_angle(dx, dy) {
 }
 
 // return the angle sweep from angle a1 to a2 in cw (+) or ccw (-) dir.
-function angle_sweep(a1, a2, circle_sweep, clockwise) {
+function angle_sweep(a1, a2, clockwise, circle_sweep) {
+	circle_sweep ??= 4
 	let d = a2 - a1
 	if (d < 0 && clockwise)
 		d += circle_sweep
@@ -589,17 +588,16 @@ function angle_sweep(a1, a2, circle_sweep, clockwise) {
 		d -= circle_sweep
 	return d
 }
-G.a = pseudo_angle
-G.s = angle_sweep
 
-// return p1 from p.adj where p1 is rightmost of (p0,p) vector.
-function next_adj(p0, p, clockwise) {
+// return p1 from p.adj where the angle at p on (p0,p,p1) is smallest in cw or ccw direction.
+function next_adj(p0, p, clockwise, max_a) {
+	max_a ??= inf
 	if (p.adj.length == 1) // end-point, go back (or forward if first)
-		return p.adj[0]
+		return 2 <= max_a ? p.adj[0] : null
 	let x0 = p0 ? p0[0] - p[0] : 0
 	let y0 = p0 ? p0[1] - p[1] : 1
 	let a0 = pseudo_angle(x0, y0)
-	let min_a = 4 // min angle
+	let min_a = inf // min angle
 	let min_p // point with min angle to (p0,p)
 	for (let p1 of p.adj) {
 		if (p1 == p0)
@@ -607,8 +605,8 @@ function next_adj(p0, p, clockwise) {
 		let x1 = p1[0] - p[0]
 		let y1 = p1[1] - p[1]
 		let a1 = pseudo_angle(x1, y1)
-		let a = abs(angle_sweep(a1, a0, 4, clockwise))
-		if (a < min_a) {
+		let a = abs(angle_sweep(a1, a0, clockwise))
+		if (a < min_a && a <= max_a) {
 			min_a = a
 			min_p = p1
 		}
@@ -633,32 +631,34 @@ function extract_cycles_for(comp) {
 	let ps = [...comp.ps]
 	while (ps.length > 0) {
 		let p = left_bottom_point(ps)
-		let walk = closed_walk(p)
-		if (walk[1] != walk[walk.length-1]) { // not started with a filament
-			walk.i = cycles.length
-			walk.comp = comp
-			cycles.push(walk)
+		let c = closed_walk(p)
+		if (c[1] != c[c.length-1]) { // not started with a filament
+			c.i = cycles.length
+			c.comp = comp
+			c.area = abs(polygon_area(c))
+			cycles.push(c)
 		}
 		// the first edge is always safe to remove because starting from the leftmost
 		// point means that there cannot be a cycle to the right of that first edge
 		// so that edge is part of at most one cycle: our cycle.
-		rem_edge(walk[0], walk[1], ps)
+		rem_edge(c[0], c[1], ps)
 		// the removed edge's end-points are now possibly end-points of filaments
 		// that we must remove too.
-		rem_filament(walk[0], ps)
-		rem_filament(walk[1], ps)
+		rem_filament(c[0], ps)
+		rem_filament(c[1], ps)
 	}
 	rebuild_adj_refs()
 }
 
 function extract_outer_edge_for(comp) {
 	let p = left_bottom_point(comp.ps)
-	let walk = closed_walk(p, true)
-	walk.i = cycles.length
-	walk.outer = true
-	walk.comp = comp
-	cycles.push(walk)
-	comp.outer_edge = walk
+	let c = closed_walk(p, true)
+	c.i = cycles.length
+	c.outer = true
+	c.comp = comp
+	c.area = abs(polygon_area(c))
+	cycles.push(c)
+	comp.outer_edge = c
 }
 
 function extract_cycles() {
@@ -674,7 +674,7 @@ function extract_cycles() {
 
 	if (DEBUG_PLAN)
 	for (let c of cycles)
-		log('cycle {0} {2} {3} {4}: {1}', c.i, c.map(p=>p.i).join(','),
+		log('cycle {0} {2} {3} {4}: {1}', c.i, c.map(p=>p.i).join(' '),
 			is_cw(c) ? 'cw' : 'ccw',
 			c.outer ? 'outer' : '',
 			c.inside ? 'inside' : '',
@@ -773,6 +773,17 @@ function offset_corner(p0, p1, p2, d, out) {
 		out[3] = y4
 		return out
 	}
+	if (t1 != t1) { // straight lines
+		out[0] = x2
+		out[1] = y2
+		out[2] = null
+		out[3] = null
+		return out
+	}
+	// if (t1 != t1) { // coincidental
+	// 	out[0] =
+	// 	out[1] =
+	// }
 	out[2] = null
 	out[3] = null
 	return line_point(t1, x1, y1, x2, y2, out)
@@ -789,10 +800,12 @@ function offset_poly(ps, d) {
 		let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d, out)
 		let op1 = [x1, y1]
 		op1.p = p1
+		op1.ci = i
 		ops.push(op1)
 		if (x2 != null) {
 			let op2 = [x2, y2]
 			op2.p = p1
+			op2.ci = i
 			ops.push(op2)
 		}
 	}
@@ -855,35 +868,63 @@ G.pr_plan = pr_plan
 
 // UI ------------------------------------------------------------------------
 
-function cycles_of(seg) {
-	let a = []
-	let [p1, p2] = seg.ps
-	for (let cycle of cycles)
-		if (cycle.includes(p1) && cycle.includes(p2))
-			a.push(cycle)
-	return a
+// Find and fix the the cycles that contain the sequence (p0,p1,p2) or (p2,p1,p0).
+// If (p0,p1,p2) is found then the cycle is to the left of the sequence if it's an inner cycle.
+// If (p2,p1,p0) is found then the cycle is to the right of the sequence if it's an inner cycle.
+// It's the opposite if it's an outer cycle.
+// The same cycle will contain the sequence twice (once as is once in reverse)
+// if the sequence is (part of) a filament.
+function fix_cycle(c, i, fw, action, new_p, p0, p1, p2) {
+	if (action == 'replace') {
+		log('cycle point replaced: {0}/{1}: {2}->{3}', c.i, i, c[i].i, new_p.i)
+		c[i] = new_p
+	} else if (action == 'insert') {
+		i = fw ? i : i+1 // insert point in the cycle array
+		log('cycle point inserted: {0}/{1} (before {2}): {3}', c.i, i, c[i].i, new_p.i)
+		insert(c, i, new_p)
+	}
+}
+function fix_cycles_containing(p0, p1, p2, action, new_p) {
+	log('finding cycles containing ({0},{1},{2}): {3} with {4}', p0.i, p1.i, p2.i, action, new_p.i)
+	for (let c of cycles) {
+		let i0 = 0
+		while (1) {
+			let i = c.indexOf(p1, i0)
+			if (i == -1)
+				break
+			let fp0 = c[mod(i-1, c.length)]
+			let fp2 = c[mod(i+1, c.length)]
+			if (fp0 == p0 && fp2 == p2) fix_cycle(c, i, 1, action, new_p, p0, p1, p2)
+			if (fp0 == p2 && fp2 == p0) fix_cycle(c, i, 0, action, new_p, p2, p1, p0)
+			i0 = i+1
+		}
+	}
 }
 
 // colinear segs directly end-to-end tied to the segment we want to move
 // must be separated by addidng a _|_ seg in between so they're not dragged along.
 // NOTE: do not deduplicate points after this!
-function detach_seg_at(seg, i) {
-	let cycles = cycles_of(seg)
-	let p = seg.ps[i]
-	let new_p = add_point(p[0], p[1])
-	// repair cycles by adding or replacing the point where segment was cut.
-	pr('fixing cycles', cycles.map(c => c.i).join(','))
-	for (let cycle of cycles) {
-		cycle[cycle.indexOf(p)] = new_p
-		pr('cycle fixed: '+cycle.i)
+function detach_seg_at(seg, i, p00) {
+	let p  = seg.ps[i]
+	let p0 = seg.ps[1-i]
+	let new_p = add_point(p[0], p[1], 1)
+
+	// each side of (p0,p) needs a different kind of fixing depending on
+	// whether there's a _|_ seg at the separation point on that side or not.
+	if (p.adj.length > 2) {
+		for (let cw = 0; cw <= 1; cw++) {
+			let p1 = next_adj(p0, p, cw, 1)
+			fix_cycles_containing(p0, p, p1 ?? p00, p1 ? 'replace' : 'insert', new_p)
+		}
+	} else { // no _|_ segs on the sides.
+		fix_cycles_containing(p0, p, p00, 'insert', new_p)
 	}
+
 	set_seg_point(seg, i, new_p, 1)
-	let seg1 = add_seg(p, new_p)
-	check(false, 'segment detached: {0}', seg.i)
-	pr(ps.indexOf(p))
-	//return seg1
+	let new_seg = add_seg(p, new_p)
+	log('segment detached: {0}', seg.i)
 }
-function colinear_seg(seg, i) {
+function opposite_seg(seg, i) {
 	let v = is_v(seg)
 	let p = seg.ps[i]
 	for (let seg1 of p.segs) { // each segment connected to that end-point
@@ -896,16 +937,16 @@ function colinear_seg(seg, i) {
 		return seg1
 	}
 }
-function detach_colinear_seg_at(seg, i) {
-	let seg1 = colinear_seg(seg, i)
+function detach_opposite_seg(seg, i) {
+	let seg1 = opposite_seg(seg, i)
 	if (!seg1) return
 	let p = seg.ps[i]
-	if (seg1.ps[0] == p) detach_seg_at(seg1, 0)
-	if (seg1.ps[1] == p) detach_seg_at(seg1, 1)
+	if (seg1.ps[0] == p) detach_seg_at(seg1, 0, seg.ps[1-i])
+	if (seg1.ps[1] == p) detach_seg_at(seg1, 1, seg.ps[1-i])
 }
 function detach_colinear_segs(seg) {
-	detach_colinear_seg_at(seg, 0)
-	detach_colinear_seg_at(seg, 1)
+	detach_opposite_seg(seg, 0)
+	detach_opposite_seg(seg, 1)
 }
 
 function start_move_seg(seg) {
@@ -936,8 +977,8 @@ function fix_plan(check) {
 // NOTE: do `ps.push(ps[0], ps[1])` before you call this!
 function polygon_area(ps) {
 	let area = 0
-	for (let i = 1, n = ps.length; i <= n; i ++)
-		area += ps[i][0] * (ps[i+1][1] - ps[i-1][1])
+	for (let i = 1, n = ps.length; i <= n; i++)
+		area += ps[mod(i, n)][0] * (ps[mod(i+1, n)][1] - ps[i-1][1])
 	return area / 2
 }
 
@@ -1018,15 +1059,10 @@ ui.widget('house_plan', {
 
 		}
 
-		for (let cycle of cycles) {
+		for (let c of cycles) {
 			cx.beginPath()
-			for (let p of cycle.edges) {
-
-				// let [x, y] = p
-				// cx.fillStyle = 'white'
-				// cx.fillText(cycle.i+':'+p.p.i, x, y+10)
-
-				if (p == cycle.edges[0])
+			for (let p of c.edges) {
+				if (p == c.edges[0])
 					cx.moveTo(...p)
 				else
 					cx.lineTo(...p)
@@ -1035,11 +1071,18 @@ ui.widget('house_plan', {
 			cx.strokeStyle = '#555'
 			cx.stroke()
 
+			if (DEBUG)
+			for (let p of c.edges) {
+				let [x, y] = p
+				cx.fillStyle = '#0f0'
+				cx.fillText(c.i+':'+p.ci, x-5, y+5)
+			}
+
 			if (DEBUG_PLAN)
 			{
-			let [x,y] = poly_center(cycle)
-			cx.fillStyle = '#99f'
-			cx.fillText(cycle.i, x, y+5)
+			let [x,y] = poly_center(c)
+			cx.fillStyle = c.outer ? '#39f' : '#99f'
+			cx.fillText(c.i + (c.area ? ' ('+format_kcount(c.area / 1e4)+'m²)' : ''), x, y+5)
 			}
 
 		}
