@@ -32,16 +32,20 @@ let ps = [
 	[300,200],
 	[200,0],
 	[200,400],
+
 	[300,200],
 	[300,100],
 	[400,100],
 	[400,200],
+
 	[200,400],
 	[300,400],
 
 	[-100,0],
 
-	[0,0],[0,0],[0,0],
+	[600,300],
+	[600,400],
+	[700,300],
 
 	[0,600+0],
 	[300,600+0],
@@ -63,12 +67,19 @@ let segs = [
 	{ps: [4,5]},
 	{ps: [6,7]},
 	{ps: [8,9]},
+
 	{ps: [10,11]},
 	{ps: [11,12]},
 	{ps: [12,13]},
 	{ps: [13,10]},
-	//{ps: [14,15]},
-	//{ps: [15,0]},
+
+	{ps: [14,15]},
+
+	{ps: [16,0]},
+
+	{ps: [5,17]},
+	{ps: [17,18]},
+	{ps: [17,19]},
 
 	{ps: [20,21]},
 	{ps: [21,22]},
@@ -618,31 +629,16 @@ function closed_walk(first, outer_edge) {
 	return walk
 }
 
-function reduce_walk(w) {
-	for (let i=1, n = w.length; i < n; i++) {
-		let idup = w.lastIndexOf(w[i])
-		if (idup > i) {
-			w.splice(i+1, idup - i)
-			break
-		}
-	}
-	return w
-}
-
 function extract_cycles_for(comp) {
-
 	let ps = [...comp.ps]
-
 	while (ps.length > 0) {
 		let p = left_bottom_point(ps)
 		let walk = closed_walk(p)
-		walk.i = cycles.length
-		walk.comp = comp
-		cycles.push(walk)
-
-		// walk = [...walk]
-		// reduce_walk(walk)
-
+		if (walk[1] != walk[walk.length-1]) { // not started with a filament
+			walk.i = cycles.length
+			walk.comp = comp
+			cycles.push(walk)
+		}
 		// the first edge is always safe to remove because starting from the leftmost
 		// point means that there cannot be a cycle to the right of that first edge
 		// so that edge is part of at most one cycle: our cycle.
@@ -652,15 +648,7 @@ function extract_cycles_for(comp) {
 		rem_filament(walk[0], ps)
 		rem_filament(walk[1], ps)
 	}
-
-	//cycles.shift()
-
-	//for (let cycle of cycles)
-	//	if (check(is_cw(cycle), 'cycle {0} is cw: reversing', cycle.i))
-	//		cycle.reverse()
-
 	rebuild_adj_refs()
-
 }
 
 function extract_outer_edge_for(comp) {
