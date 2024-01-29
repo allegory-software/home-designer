@@ -19,6 +19,50 @@ DEBUG('DEBUG_PLAN')
 
 let clone = structuredClone
 
+// debugging -----------------------------------------------------------------
+
+let errs = []
+let log_stack = []
+function log(err, ...args) {
+	errs.push(isstr(err) ? subst(err, ...args) : err)
+}
+function log_push() {
+	log_stack.push(errs)
+	errs = []
+	errs.t0 = clock()
+}
+function log_pop(err, ...args) {
+	let errs1 = errs
+	let dt = (clock() - errs1.t0) * 1000
+	errs1.dt = dt
+	errs = log_stack.pop()
+	if (err !== undefined && errs1.length) {
+		log(err, ...args)
+		log(errs1)
+		if (dt > 3)
+			log('{0} TIME {1} ms', ('*').repeat(dt), dec(dt))
+	} else {
+		return errs1
+	}
+}
+function check(v, ...args) {
+	if (!v) log(...args)
+	return v
+}
+function pr_errs(es, level) {
+	let indent = ('  ').repeat(level)
+	for (let s of es)
+		if (isarray(s))
+			pr_errs(s, level+1)
+		else
+			pr(indent + s)
+}
+function pr_log() {
+	assert(!log_stack.length)
+	pr_errs(errs, 0)
+	errs.length = 0
+}
+
 // house plan model ----------------------------------------------------------
 
 let ps = [
@@ -60,36 +104,45 @@ let ps = [
 ]
 
 let segs = [
-	{ps: [0,1]},
-	{ps: [1,2]},
-	{ps: [2,3]},
-	{ps: [3,0]},
-	{ps: [4,5]},
-	{ps: [6,7]},
-	{ps: [8,9]},
+	[[0,0],[500,0]],
+	[1,2],
+	[2,3],
+	[3,0],
+	[4,5],
+	[6,7],
+	[8,9],
 
-	{ps: [10,11]},
-	{ps: [11,12]},
-	{ps: [12,13]},
-	{ps: [13,10]},
+	[10,11],
+	[11,12],
+	[12,13],
+	[13,10],
 
-	{ps: [14,15]},
+	[14,15],
 
-	{ps: [16,0]},
+	[16,0],
 
-	{ps: [5,17]},
-	{ps: [17,18]},
-	{ps: [17,19]},
+	[5,17],
+	[17,18],
+	[17,19],
 
-	{ps: [20,21]},
-	{ps: [21,22]},
-	{ps: [22,23]},
-	{ps: [23,20]},
+	[20,21],
+	[21,22],
+	[22,23],
+	[23,20],
 
-	{ps: [24,25]},
-	{ps: [25,26]},
-	{ps: [26,27]},
-	{ps: [27,24]},
+	[24,25],
+	[25,26],
+	[26,27],
+	[27,24],
+
+	[[700,500],[700,1000]],
+	[[700,1000],[1200,1000]],
+	[[1200,1000],[1200,500]],
+	[[1200,500],[700,500]],
+	[[900,500],[900,1000]],
+	[[700,600],[900,600]],
+	[[700,800],[900,800]],
+	[[900,700],[1200,700]],
 ]
 
 let cycles = []
@@ -100,31 +153,53 @@ G.cycles = cycles
 
 // model editing -------------------------------------------------------------
 
-function is_h(seg) { let ps = seg.ps; return ps[0][1] == ps[1][1] }
-function is_v(seg) { let ps = seg.ps; return ps[0][0] == ps[1][0] }
+function is_h(seg) { return seg[0][1] == seg[1][1] }
+function is_v(seg) { return seg[0][0] == seg[1][0] }
 function is_null(seg) { return is_h(seg) && is_v(seg) }
 
-function seg_x1(seg) { let ps = seg.ps; return min(ps[0][0], ps[1][0]) }
-function seg_y1(seg) { let ps = seg.ps; return min(ps[0][1], ps[1][1]) }
-function seg_x2(seg) { let ps = seg.ps; return max(ps[0][0], ps[1][0]) }
-function seg_y2(seg) { let ps = seg.ps; return max(ps[0][1], ps[1][1]) }
+function seg_x1(seg) { return min(seg[0][0], seg[1][0]) }
+function seg_y1(seg) { return min(seg[0][1], seg[1][1]) }
+function seg_x2(seg) { return max(seg[0][0], seg[1][0]) }
+function seg_y2(seg) { return max(seg[0][1], seg[1][1]) }
 
-function set_seg_x1(seg, x) { let ps = seg.ps; let x1i = ps[0][0] < ps[1][0] ? 0 : 1; ps[x1i][0] = x }
-function set_seg_y1(seg, y) { let ps = seg.ps; let y1i = ps[0][1] < ps[1][1] ? 0 : 1; ps[y1i][1] = y }
-function set_seg_x2(seg, x) { let ps = seg.ps; let x2i = ps[0][0] < ps[1][0] ? 1 : 0; ps[x2i][0] = x }
-function set_seg_y2(seg, y) { let ps = seg.ps; let y2i = ps[0][1] < ps[1][1] ? 1 : 0; ps[y2i][1] = y }
+function set_seg_x1(seg, x) { let x1i = seg[0][0] < seg[1][0] ? 0 : 1; seg[x1i][0] = x }
+function set_seg_y1(seg, y) { let y1i = seg[0][1] < seg[1][1] ? 0 : 1; seg[y1i][1] = y }
+function set_seg_x2(seg, x) { let x2i = seg[0][0] < seg[1][0] ? 1 : 0; seg[x2i][0] = x }
+function set_seg_y2(seg, y) { let y2i = seg[0][1] < seg[1][1] ? 1 : 0; seg[y2i][1] = y }
 
 function seg_axis(seg) { return is_v(seg) ? seg_x1(seg) : seg_y1(seg) }
 function seg_m1  (seg) { return is_v(seg) ? seg_y1(seg) : seg_x1(seg) }
 function seg_m2  (seg) { return is_v(seg) ? seg_y2(seg) : seg_x2(seg) }
 
-function set_seg_m1(seg, m) { if (is_v(seg)) set_seg_y1(seg, m); else set_seg_x1(seg, m) }
-function set_seg_m2(seg, m) { if (is_v(seg)) set_seg_y2(seg, m); else set_seg_x2(seg, m) }
+function set_seg_m1  (seg, m) { if (is_v(seg)) set_seg_y1(seg, m); else set_seg_x1(seg, m) }
+function set_seg_m2  (seg, m) { if (is_v(seg)) set_seg_y2(seg, m); else set_seg_x2(seg, m) }
+function set_seg_axis(seg, a) {
+	if (is_v(seg)) {
+		seg[0][0] = a
+		seg[1][0] = a
+	} else {
+		seg[0][1] = a
+		seg[1][1] = a
+	}
+}
 
 function points_equal(p1, p2) { return p1[0] == p2[0] && p1[1] == p2[1] }
 
+function adj_point_index(seg, p) {
+	return seg[0] == p ? 1 : seg[1] == p ? 0 : null
+}
 function adj_point(seg, p) {
-	return assert(seg.ps[seg.ps[0] == p ? 1 : seg.ps[1] == p ? 0 : -1])
+	return assert(seg[adj_point_index(seg, p)])
+}
+
+function normalize_seg(seg) {
+	let M = is_v(seg) ? 1 : 0
+	let p1 = seg[0]
+	let p2 = seg[1]
+	if (p1[M] > p2[M]) {
+		seg[0] = p2
+		seg[1] = p1
+	}
 }
 
 function init_point(p, i) {
@@ -133,28 +208,28 @@ function init_point(p, i) {
 	p.i = i
 }
 
-function add_point(x, y, log) {
+function add_point(x, y) {
 	let p = [x, y]
 	init_point(p, ps.length)
 	ps.push(p)
-	check(!log, '{0}: {1}', isstr(log) ? log : 'point added', p.i)
+	log('point added: {0}', p.i)
 	return p
 }
 
-function rem_point(p, log) {
+function rem_point(p) {
 	remove_value(ps, p)
-	check(!log, '{0}: {1}', isstr(log) ? log : 'point removed', p.i)
+	log('point removed: {0}', p.i)
 }
 
-function rem_points(cond, log) {
+function rem_points(cond, msg) {
 	let a = []
 	remove_values(ps, function(p) {
 		if (!cond(p)) return
 		a.push(p.i)
 		return true
 	})
-	if (log && a.length)
-		check(false, '{0}: {1}', isstr(log) ? log : 'points removed', a.join(' '))
+	if (a.length)
+		log('{0} removed: {1}', msg ?? 'points', a.join(' '))
 }
 
 function add_seg_ref(p, seg) {
@@ -166,30 +241,32 @@ function rem_seg_ref(p, seg) {
 }
 
 function add_seg_refs(seg) {
-	add_seg_ref(seg.ps[0], seg)
-	add_seg_ref(seg.ps[1], seg)
+	add_seg_ref(seg[0], seg)
+	add_seg_ref(seg[1], seg)
 }
 
 function rem_seg_refs(seg) {
-	rem_seg_ref(seg.ps[0], seg)
-	rem_seg_ref(seg.ps[1], seg)
+	rem_seg_ref(seg[0], seg)
+	rem_seg_ref(seg[1], seg)
 }
 
-function add_seg(p1, p2, log) {
-	let seg = {ps: [p1, p2], i: segs.length}
+function add_seg(p1, p2) {
+	let seg = [p1, p2]
+	seg.i = segs.length
+	normalize_seg(seg)
 	segs.push(seg)
 	add_seg_refs(seg)
-	check(!log, '{0}: {1}', isstr(log) ? log : 'seg added', seg.i)
+	log('seg added: {0}: {1} {2}', seg.i, seg[0].i, seg[1].i)
 	return seg
 }
 
-function rem_seg(seg, log) {
+function rem_seg(seg) {
 	rem_seg_refs(seg)
 	remove_value(segs, seg)
-	check(!log, '{0}: {1}', isstr(log) ? log : 'seg removed', seg.i)
+	log('seg removed: {0}', seg.i)
 }
 
-function rem_segs(cond, log) {
+function rem_segs(cond, msg) {
 	let a = []
 	remove_values(segs, function(seg) {
 		if (!cond(seg)) return
@@ -198,19 +275,20 @@ function rem_segs(cond, log) {
 		return true
 	})
 	if (log && a.length)
-		check(false, '{0}: {1}', isstr(log) ? log : 'segs removed', a.join(','))
+		log('{0} removed: {1}', msg ?? 'segs', a.join(','))
 }
 
-function rem_marked_segs(log) {
-	rem_segs(seg => seg.removed, log)
+function rem_marked_segs(msg) {
+	rem_segs(seg => seg.removed, msg)
 }
 
-function set_seg_point(seg, i, p, log) {
-	let p0i = seg.ps[i].i
-	rem_seg_refs(seg)
-	seg.ps[i] = p
-	add_seg_refs(seg)
-	check(!log, '{0}: {1}/{2}: {3}->{4}', isstr(log) ? log : 'seg end moved', seg.i, i, p0i, p.i)
+function set_seg_point(seg, i, p) {
+	let old_p = seg[i]
+	rem_seg_ref(old_p, seg)
+	seg[i] = p
+	add_seg_ref(p, seg)
+	log('seg end moved: {0}/{1}: {2}->{3}', seg.i, i, old_p.i, p.i)
+	return old_p
 }
 
 function rebuild_seg_refs() {
@@ -221,93 +299,79 @@ function rebuild_seg_refs() {
 }
 
 function remove_isolated_points() {
-	rem_points(p => p.segs.length == 0, 'isolated points removed')
+	rem_points(p => p.segs.length == 0, 'isolated points')
 }
 
 function remove_null_segs() {
-	rem_segs(is_null, 'null segment {0}: removed')
+	rem_segs(is_null, 'null segs')
 }
 
 function remove_angled_segs() {
-	rem_segs(seg => !is_v(seg) && !is_h(seg), 'angled segment {0}: removed')
+	rem_segs(seg => !is_v(seg) && !is_h(seg), 'angled segs')
 }
 
+// NOTE: assumes segs are sorted, null segs removed, points deduplicated
 function merge_colinear_segs() {
-	//
-}
-
-// NOTE: requires point deduplication afterwards.
-// NOTE: requires removal of segs marked for removal afterwards.
-function break_seg_at(seg, xy) {
-	let s1, s2
-	if (is_v(seg)) {
-		let y = xy
-		let y1 = seg_y1(seg)
-		let y2 = seg_y2(seg)
-		let x  = seg_x1(seg)
-		if (y == y1 || y == y2)
-			return
-		seg.removed = true
-		s1 = add_seg(add_point(x, y1), add_point(x, y))
-		s2 = add_seg(add_point(x, y2), add_point(x, y))
-	} else {
-		let x = xy
-		let x1 = seg_x1(seg)
-		let x2 = seg_x2(seg)
-		let y  = seg_y1(seg)
-		if (x == x1 || x == x2)
-			return
-		seg.removed = true
-		s1 = add_seg(add_point(x1, y), add_point(x, y))
-		s2 = add_seg(add_point(x2, y), add_point(x, y))
+	for (let p of ps) {
+		if (p.segs.length == 2) {
+			let s1 = p.segs[0]
+			let s2 = p.segs[1]
+			if (is_v(s1) == is_v(s2)) { // colinear
+				let p1i = adj_point_index(s2, p)
+				let p2  = adj_point(s2, p)
+				log_push()
+				set_seg_point(s1, p1i, p2)
+				rem_seg(s2)
+				log_pop('segs merged: {0} + {1} => {0}', s1.i, s2.i, s1.i)
+			}
+		}
 	}
-	log('seg split: {0} @ {1} => {2} {3}', seg.i, xy, s1.i, s2.i)
 }
 
-function segs_intersect(seg1, seg2) {
-	if (is_h(seg1))
-		[seg1, seg2] = [seg2, seg1]
-
-	let y1 = seg_y1(seg1)
-	let y2 = seg_y2(seg1)
-	let x  = seg_x1(seg1)
-
-	let x1 = seg_x1(seg2)
-	let x2 = seg_x2(seg2)
-	let y  = seg_y1(seg2)
-
-	return x >= x1 && x <= x2 && y >= y1 && y <= y2
+// shortens seg at m with new point and adds new seg without detaching the original seg's end-points.
+function split_seg_at(seg, m) {
+	log_push()
+	normalize_seg(seg)
+	let m1 = seg_m1(seg)
+	let m2 = seg_m2(seg)
+	let x = is_v(seg) ? seg_x1(seg) : m
+	let y = is_v(seg) ? m : seg_y1(seg)
+	let new_p = add_point(x, y)
+	let old_p = set_seg_point(seg, 1, new_p)
+	let new_seg = add_seg(new_p, old_p)
+	log_pop('seg split: {0} {4}>{1}<{5} => {2} {3}', seg.i, m, seg.i, new_seg.i, m1, m2)
 }
 
-function segs_perpendicular(seg1, seg2) {
-	let v1 = is_v(seg1)
-	let h1 = is_h(seg1)
-	let v2 = is_v(seg2)
-	let h2 = is_h(seg2)
-	return (v1 && h2) || (h1 && v2)
-}
-
-function break_intersecting_segs(seg1, seg2) {
-	if (!segs_perpendicular(seg1, seg2))
-		return
-	if (!segs_intersect(seg1, seg2))
-		return
-	break_seg_at(seg1, seg_axis(seg2))
-}
-
-function break_all_intersecting_segs_on(v) {
+// NOTE: only works for h and v segs.
+function split_intersecting_segs_on(v) {
+	log_push()
 	for (let seg1 of segs) {
 		if (is_v(seg1) == v) {
 			for (let seg2 of segs) {
 				if (is_v(seg2) != v) {
-					break_intersecting_segs(seg1, seg2)
-					if (seg1.removed)
-						break
+					let m1  = seg_m1(seg1)
+					let m2  = seg_m2(seg1)
+					let bm1 = seg_m1(seg2)
+					let bm2 = seg_m2(seg2)
+					let a   = seg_axis(seg1)
+					let ba  = seg_axis(seg2)
+					if (bm1 <= a && bm2 >= a && ba > m1 && ba < m2) {
+						// splitting adds a seg at the end of segs array which will
+						// be also tested in the outer loop and possibly split further.
+						// the shortened seg is potentially split multiple times
+						// in this inner loop.
+						split_seg_at(seg1, ba)
+					}
 				}
 			}
 		}
 	}
-	rem_marked_segs('segs removed (from seg split)')
+	rem_marked_segs('unsplit segs')
+	log_pop('split all intersecting segs')
+}
+function split_intersecting_segs() {
+	split_intersecting_segs_on(0)
+	split_intersecting_segs_on(1)
 }
 
 function points_cmp(p1, p2) {
@@ -322,6 +386,7 @@ function points_cmp(p1, p2) {
 
 // NOTE: leaves isolated points behind.
 function deduplicate_points() {
+	log_push()
 	ps.sort(points_cmp)
 	let p0
 	for (let i = 0; i < ps.length; i++) {
@@ -330,7 +395,7 @@ function deduplicate_points() {
 			for (let j = 0; j < p.segs.length; j++) { // each connected seg
 				let seg = p.segs[j]
 				for (let i = 0; i < 2; i++) // each seg end
-					if (seg.ps[i] == p) {
+					if (seg[i] == p) {
 						set_seg_point(seg, i, p0, 'seg end point dedup')
 						j-- // because seg was just removed from p.segs
 					}
@@ -339,10 +404,12 @@ function deduplicate_points() {
 		}
 		p0 = p
 	}
+	log_pop('deduplicate all points')
 }
 
 // NOTE: requires no intersecting segments.
-function break_overlapping_colinear_segs() {
+function break_overlapping_segs() {
+	log_push()
 	segs.sort(function(s1, s2) {
 		let v1 = is_v(s1)
 		let v2 = is_v(s2)
@@ -357,53 +424,37 @@ function break_overlapping_colinear_segs() {
 		// level 3 grouping by starting point because most segments are
 		// non-overlapping and we sant to skip those quickly.
 		let i = v1 ? 1 : 0
-		let c1 = min(s1.ps[0][i], s1.ps[1][i])
-		let c2 = min(s2.ps[0][i], s2.ps[1][i])
+		let c1 = min(s1[0][i], s1[1][i])
+		let c2 = min(s2[0][i], s2[1][i])
 		if (c1 < c2) return -1
 		if (c1 > c2) return  1
 		return 0
 	})
 	let i0, v0, m0
-	let i = 0
-	let n = segs.length
-	for (let seg of segs) {
-		let v = is_v(seg)
-		let m = seg_axis(seg)
+	for (let i = 0, n = segs.length; i <= n; i++) {
+		let seg = segs[i]
+		let v = seg ? is_v(seg) : null
+		let m = seg ? seg_axis(seg) : null
 		if (v0 == null) {
 			i0 = i
 			v0 = v
 			m0 = m
 		} else if (v != v0 || m != m0) {
-			if (i-1 > i0) { // there's at least 2 colinear segments
-				let seg_m1 = v ? seg_y1 : seg_x1
-				let seg_m2 = v ? seg_y2 : seg_x2
-				let overlap
+			if (i >= i0 + 2) { // there's at least 2 segments on this axis
 				for (let j = i0+1; j < i; j++) {
 					let seg1 = segs[j]
 					let seg0 = segs[j-1]
 					let m1_1 = seg_m1(seg1)
 					let m2_0 = seg_m2(seg0)
 					if (m1_1 < m2_0) {
-						log('segments overlap: {0} {1}: {2} <= {3}: removed',
-							seg0.i, seg1.i, m1_1, m2_0)
-						overlap = true
-						break
-					}
-				}
-				if (overlap) {
-					for (let j = i0+1; j < i; j++) {
-						let seg1 = segs[j]
-						let seg0 = segs[j-1]
-						let m1_1 = seg_m1(seg1)
-						let m2_0 = seg_m2(seg0)
-						if (m1_1 < m2_0) {
-							// seg points that are overlapping segs have no _|_ joints
-							// or they wouldn't be overlapping the seg, so it's safe
-							// to remove the overlapping seg as long as we elongate
-							// the overlapped seg.
-							seg1.removed = true
-							set_seg_m2(seg0, seg_m2(seg1))
-						}
+						// seg points that are overlapping segs have no _|_ joints
+						// or they wouldn't be overlapping the seg, so it's safe
+						// to remove the overlapping seg as long as we elongate
+						// the overlapped seg.
+						log('segs overlap: {0} {1}: {2}<={3}: seg {1} removed, seg {0}.m2 set to {4}',
+							seg0.i, seg1.i, m1_1, m2_0, seg_m2(seg1))
+						seg1.removed = true
+						set_seg_m2(seg0, max(seg_m2(seg1), seg_m2(seg0)))
 					}
 				}
 			}
@@ -411,24 +462,9 @@ function break_overlapping_colinear_segs() {
 			v0 = v
 			m0 = m
 		}
-		i++
-		if (i == n) break // skip just-added segs
 	}
-	rem_marked_segs('segs removed (overlapping colinear)')
-}
-
-let errs = []
-function log(err, ...args) {
-	errs.push(subst(err, ...args))
-}
-function check(v, ...args) {
-	if (!v) log(...args)
-	return v
-}
-function pr_log() {
-	for (let s of errs)
-		pr(s)
-	errs.length = 0
+	rem_marked_segs()
+	log_pop('breaking overlapping colinear segs')
 }
 
 function rebuild_adj_refs() {
@@ -437,10 +473,6 @@ function rebuild_adj_refs() {
 	for (let p of ps)
 		for (let seg of p.segs)
 			p.adj.push(adj_point(seg, p))
-
-	if (0 && DEBUG_PLAN)
-	for (let p of ps)
-		log('adj {0}: {1}', p.i, p.adj.map(p => p.i).join(' '))
 }
 
 // finding graph components --------------------------------------------------
@@ -468,14 +500,13 @@ function find_comps() {
 
 	for (let p of ps) {
 		if (!p.visited) {
-			let comp = {}
+			let comp = []
 			comp.i = comps.length
-			comp.ps = []
 			let segs = set()
 			comps.push(comp)
-			dfs(p, comp.ps, segs)
+			dfs(p, comp, segs)
 			comp.segs = set_toarray(segs)
-			log('comp {0}: {1}', comp.i, comp.ps.map(p=>p.i).join(' '))
+			log('comp {0}: {1}', comp.i, comp.map(p=>p.i).join(' '))
 		}
 	}
 
@@ -487,8 +518,8 @@ function comp_bbox(comp) {
 	let bx2 = -inf
 	let by2 = -inf
 	for (let seg of comp.segs) {
-		let [x1, y1] = seg.ps[0]
-		let [x2, y2] = seg.ps[1]
+		let [x1, y1] = seg[0]
+		let [x2, y2] = seg[1]
 		bx1 = min(bx1, x1, x2)
 		bx2 = max(bx2, x1, x2)
 		by1 = min(by1, y1, y2)
@@ -623,12 +654,12 @@ function closed_walk(first, outer_edge) {
 		let next = next_adj(prev, curr, !prev || outer_edge)
 		prev = curr
 		curr = next
-	} while (curr != first)
+	} while (curr != first) // TODO: fix |_ bug
 	return walk
 }
 
 function extract_cycles_for(comp) {
-	let ps = [...comp.ps]
+	let ps = [...comp]
 	while (ps.length > 0) {
 		let p = left_bottom_point(ps)
 		let c = closed_walk(p)
@@ -647,11 +678,10 @@ function extract_cycles_for(comp) {
 		rem_filament(c[0], ps)
 		rem_filament(c[1], ps)
 	}
-	rebuild_adj_refs()
 }
 
 function extract_outer_edge_for(comp) {
-	let p = left_bottom_point(comp.ps)
+	let p = left_bottom_point(comp)
 	let c = closed_walk(p, true)
 	c.i = cycles.length
 	c.outer = true
@@ -672,7 +702,6 @@ function extract_cycles() {
 		extract_outer_edge_for(comp)
 	rebuild_adj_refs()
 
-	if (DEBUG_PLAN)
 	for (let c of cycles)
 		log('cycle {0} {2} {3} {4}: {1}', c.i, c.map(p=>p.i).join(' '),
 			is_cw(c) ? 'cw' : 'ccw',
@@ -772,17 +801,17 @@ function offset_corner(p0, p1, p2, d, out) {
 		out[2] = x4
 		out[3] = y4
 		return out
-	}
-	if (t1 != t1) { // coincidental: use the offset point on the first line
+	} else if (t1 != t1) { // coincidental: use the offset point on the first line
 		out[0] = x2
 		out[1] = y2
 		out[2] = null
 		out[3] = null
 		return out
+	} else {
+		out[2] = null
+		out[3] = null
+		return line_point(t1, x1, y1, x2, y2, out)
 	}
-	out[2] = null
-	out[3] = null
-	return line_point(t1, x1, y1, x2, y2, out)
 }
 
 function offset_poly(ps, d) {
@@ -810,54 +839,61 @@ function offset_poly(ps, d) {
 
 // plan loading & validation -------------------------------------------------
 
-function create_edges(c) {
-	c.edges = offset_poly(c, (c.outer ? (c.comp.inside ? 10 : 20) : -10))
-}
-
-function load_plan() {
-
-	for (let i = 0, n = ps.length; i < n; i++)
-		init_point(ps[i], i)
-
-	let i = 0
-	for (let seg of segs) {
-		seg.i = i++
-		let i1 = seg.ps[0]
-		let i2 = seg.ps[1]
-		let p1 = check(ps[i1], 'seg {0}/0 invalid index {1}: removed', seg.i, i1)
-		let p2 = check(ps[i2], 'seg {0}/1 invalid index {1}: removed', seg.i, i2)
-		if (!(p1 && p2)) {
-			p1 = null
-			p2 = null
-		}
-		seg.ps[0] = p1
-		seg.ps[1] = p2
-	}
-	remove_values(segs, seg => !seg.ps[0])
-
-	rebuild_seg_refs()
-	remove_angled_segs()
-	break_all_intersecting_segs_on(0)
-	break_all_intersecting_segs_on(1)
-	break_overlapping_colinear_segs()
+function fix_plan() {
+	split_intersecting_segs()
+	break_overlapping_segs()
 	remove_null_segs()
-	merge_colinear_segs()
 	deduplicate_points()
+	merge_colinear_segs()
 	remove_isolated_points()
-
 	rebuild_adj_refs()
 	find_comps()
 	find_inside_comps()
 	extract_cycles()
+	create_edges()
+}
 
-	for (let cycle of cycles)
-		create_edges(cycle)
+function create_edges_for(c) {
+	c.edges = offset_poly(c, (c.outer ? (c.comp.inside ? 10 : 20) : -10))
+}
 
+function create_edges() {
+	for (let c of cycles)
+		create_edges_for(c)
+}
+
+function load_plan() {
+
+	log_push()
+
+	for (let i = 0, n = ps.length; i < n; i++)
+		init_point(ps[i], i)
+
+	let seg_i = 0
+	for (let seg of segs) {
+		seg.i = seg_i++
+		for (let k = 0; k < 2; k++) {
+			let i = seg[k]
+			let p
+			if (isarray(i)) // inline point
+				p = add_point(...i)
+			else
+				p = check(ps[i], 'seg {0}/{1} invalid index {2}', seg.i, k, i)
+			seg[k] = p
+		}
+	}
+	remove_values(segs, seg => !seg[0] || !seg[1])
+
+	rebuild_seg_refs()
+	remove_angled_segs()
+	fix_plan()
+
+	log_pop('PLAN LOADED')
 }
 
 function pr_plan() {
 	pr('ps'    , ps.map(p=>p.i).join(' '))
-	pr('segs'  , segs.map(s=>s.i+':'+s.ps[0].i+'-'+s.ps[1].i).join(' '))
+	pr('segs'  , segs.map(s=>s.i+':'+s[0].i+'-'+s[1].i).join(' '))
 	pr('cycles', cycles.map(c=>c.i+':'+c.map(p=>p.i).join(',')).join(' '))
 }
 G.pr_plan = pr_plan
@@ -881,7 +917,7 @@ function fix_cycle(c, i, fw, action, new_p, p0, p1, p2) {
 	}
 }
 function fix_cycles_containing(p0, p1, p2, action, new_p) {
-	log('finding cycles containing ({0},{1},{2}): {3} with {4}', p0.i, p1.i, p2.i, action, new_p.i)
+	log_push()
 	for (let c of cycles) {
 		let i0 = 0
 		while (1) {
@@ -895,15 +931,17 @@ function fix_cycles_containing(p0, p1, p2, action, new_p) {
 			i0 = i+1
 		}
 	}
+	log_pop('all cycles containing ({0},{1},{2}): {3} with {4}', p0.i, p1.i, p2.i, action, new_p.i)
 }
 
 // colinear segs directly end-to-end tied to the segment we want to move
 // must be separated by addidng a _|_ seg in between so they're not dragged along.
 // NOTE: do not deduplicate points after this!
 function detach_seg_at(seg, i, p00) {
-	let p  = seg.ps[i]
-	let p0 = seg.ps[1-i]
-	let new_p = add_point(p[0], p[1], 1)
+	log_push()
+	let p  = seg[i]
+	let p0 = seg[1-i]
+	let new_p = add_point(p[0], p[1])
 
 	// each side of (p0,p) needs a different kind of fixing depending on
 	// whether there's a _|_ seg at the separation point on that side or not.
@@ -918,11 +956,11 @@ function detach_seg_at(seg, i, p00) {
 
 	set_seg_point(seg, i, new_p, 1)
 	let new_seg = add_seg(p, new_p)
-	log('segment detached: {0}', seg.i)
+	log_pop('seg detached: {0}', seg.i)
 }
 function opposite_seg(seg, i) {
 	let v = is_v(seg)
-	let p = seg.ps[i]
+	let p = seg[i]
 	for (let seg1 of p.segs) { // each segment connected to that end-point
 		if (seg1 == seg) // itself
 			continue
@@ -936,38 +974,109 @@ function opposite_seg(seg, i) {
 function detach_opposite_seg(seg, i) {
 	let seg1 = opposite_seg(seg, i)
 	if (!seg1) return
-	let p = seg.ps[i]
-	if (seg1.ps[0] == p) detach_seg_at(seg1, 0, seg.ps[1-i])
-	if (seg1.ps[1] == p) detach_seg_at(seg1, 1, seg.ps[1-i])
+	let p = seg[i]
+	if (seg1[0] == p) detach_seg_at(seg1, 0, seg[1-i])
+	if (seg1[1] == p) detach_seg_at(seg1, 1, seg[1-i])
 }
 function detach_colinear_segs(seg) {
 	detach_opposite_seg(seg, 0)
 	detach_opposite_seg(seg, 1)
 }
 
-function start_move_seg(seg) {
-	detach_colinear_segs(seg)
-	pr_log()
+function segs_overlap(am1, am2, bm1, bm2) { // check if two segments overlap
+	return !(am2 <= bm1 || bm2 <= am1)
 }
 
-function move_seg(seg, seg0, dx, dy) {
-	if (is_v(seg0)) {
-		seg.ps[0][0] = seg0.ps[0][0] + dx
-		seg.ps[1][0] = seg0.ps[1][0] + dx
-	} else {
-		seg.ps[0][1] = seg0.ps[0][1] + dy
-		seg.ps[1][1] = seg0.ps[1][1] + dy
+function bump_limit(seg, sign) {
+	let v = is_v(seg)
+	let a = seg_axis(seg)
+	let min_a1 = sign * 1/0
+	let s_m1 = seg_m1(seg)
+	let s_m2 = seg_m2(seg)
+	for (let seg1 of segs) {
+		let s1_m1 = seg_m1(seg1)
+		let s1_m2 = seg_m2(seg1)
+		let a1 = seg_axis(seg1)
+		if (is_v(seg1) != v) {
+			let closest_m = sign < 0 ? max(s1_m1, s1_m2) : min(s1_m1, s1_m2)
+			s1_m1 = a1
+			s1_m2 = a1
+			a1 = closest_m
+ 		}
+		if (sign * a1 > sign * a && sign * a1 < sign * min_a1) {
+			if (segs_overlap(s_m1, s_m2, s1_m1, s1_m2)) {
+				min_a1 = a1
+			}
+		}
 	}
-	for (let cycle of cycles)
-		create_edges(cycle)
+	return min_a1
+}
+function seg_move_ranges(seg) {
+	let min_a = bump_limit(seg, -1)
+	let max_a = bump_limit(seg,  1)
+	let bump_range = [min_a, max_a]
+	let ranges = [bump_range]
+	return ranges
+}
+function seg_move_snap_lines(seg) {
+	let v = is_v(seg)
+	let as = []
+	for (let seg1 of segs) {
+		if (is_v(seg1) == v) {
+			let a = seg_axis(seg1)
+			as.push(a)
+		} else {
+			//
+		}
+	}
+	return as
+}
+function closest_move_range(a, ranges) {
+	let min_range
+	let min_d = 1/0
+	for (let range of ranges) {
+		let [a1, a2] = range
+		if (a >= a1 && a <= a2) { // in range
+			min_range = range
+			break
+		}
+		let d = min(abs(a1 - a), abs(a2 - a)) // distance to range's closest end-point
+		if (d < min_d) {
+			min_range = range
+			min_d = d
+		}
+	}
+	return min_range
+}
+function snap_to_line(a, as) {
+	for (let a1 of as)
+		if (abs(a - a1) <= 5)
+			return a1
 }
 
-function fix_plan(check) {
-	break_all_intersecting_segs_on(0, check)
-	break_all_intersecting_segs_on(1, check)
-	break_overlapping_colinear_segs(check)
-	remove_null_segs(check)
-	deduplicate_points(check)
+function move_seg_start(seg) {
+	log_push()
+	detach_colinear_segs(seg)
+	log_pop('START MOVE SEG: {0}', seg.i)
+}
+
+function move_seg(seg, seg0, ranges, snap_lines, dx, dy) {
+	let a = seg_axis(seg0) + (is_v(seg) ? dx : dy)
+	let snap_range = closest_move_range(a, ranges)
+	let [min_a, max_a] = snap_range
+	a = clamp(a, min_a, max_a)
+	let sa = snap_to_line(a, snap_lines)
+	if (sa != null)
+		a = sa
+	set_seg_axis(seg, a)
+	create_edges()
+	return sa
+}
+
+function move_seg_stop(seg) {
+	log_push()
+	fix_plan()
+	log_pop('STOP MOVE SEG: {0}', seg.i)
 }
 
 // NOTE: do `ps.push(ps[0], ps[1])` before you call this!
@@ -979,7 +1088,7 @@ function polygon_area(ps) {
 }
 
 function seg_center(seg) {
-	let [p1, p2] = seg.ps
+	let [p1, p2] = seg
 	let [x1, y1] = p1
 	let [x2, y2] = p2
 	return [
@@ -1002,9 +1111,12 @@ ui.widget('house_plan', {
 				let seg = hs.get('seg')
 				if (seg) {
 					let cs = ui.captured(id)
-					start_move_seg(seg)
+					move_seg_start(seg)
+					pr_log()
 					cs.set('seg', seg)
 					cs.set('seg0', clone(seg))
+					cs.set('ranges', seg_move_ranges(seg))
+					cs.set('snap_lines', seg_move_snap_lines(seg))
 				}
 			}
 		}
@@ -1012,14 +1124,18 @@ ui.widget('house_plan', {
 		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
 			let cs = ui.captured(id)
 			if (cs) {
-				let seg  = cs.get('seg')
-				let seg0 = cs.get('seg0')
-				move_seg(seg, seg0, dx, dy)
+				let seg        = cs.get('seg')
+				let seg0       = cs.get('seg0')
+				let ranges     = cs.get('ranges')
+				let snap_lines = cs.get('snap_lines')
+				let snap_line = move_seg(seg, seg0, ranges, snap_lines, dx, dy)
+				cs.set('snap_line', snap_line)
 			}
 		}
 
 		if (dstate == 'drop') {
-			fix_plan()
+			let cs = ui.captured(id)
+			move_seg_stop(cs.get('seg'))
 			pr_log()
 		}
 
@@ -1031,16 +1147,41 @@ ui.widget('house_plan', {
 		let id = a[i+0]
 
 		let hs = ui.hovers(id)
+		let cs = ui.captured(id)
 
 		let cx = ui.cx
 		cx.save()
 		cx.translate(120, 120)
 		cx.translate(.5, .5)
 
-		let hit_seg = hs && hs.get('seg')
+		let sa = cs && cs.get('snap_line')
+		if (sa != null) {
+			let moving_seg = cs && cs.get('seg')
+			let x1, y1, x2, y2
+			if (is_v(moving_seg)) {
+				x1 = sa
+				x2 = sa
+				y1 = 0
+				y2 = 10000
+			} else {
+				y1 = sa
+				y2 = sa
+				x1 = 0
+				x2 = 10000
+			}
+			cx.beginPath()
+			cx.moveTo(x1, y1)
+			cx.lineTo(x2, y2)
+			cx.setLineDash([6, 3])
+			cx.strokeStyle = '#555'
+			cx.stroke()
+			cx.setLineDash([])
+		}
+
+		let hit_seg = cs && cs.get('seg') || hs && hs.get('seg')
 		for (let seg of segs) {
-			let p1 = seg.ps[0]
-			let p2 = seg.ps[1]
+			let p1 = seg[0]
+			let p2 = seg[1]
 			cx.beginPath()
 			cx.moveTo(...p1)
 			cx.lineTo(...p2)
@@ -1050,7 +1191,7 @@ ui.widget('house_plan', {
 			if (DEBUG_PLAN) {
 			let [x,y] = seg_center(seg)
 			cx.fillStyle = '#f66'
-			cx.fillText(seg.i, x-10, y+5)
+			cx.fillText(seg.i, x-5, y+5)
 			}
 
 		}
@@ -1103,8 +1244,8 @@ ui.widget('house_plan', {
 		ui.update_mouse()
 
 		for (let seg of segs) {
-			let p1 = seg.ps[0]
-			let p2 = seg.ps[1]
+			let p1 = seg[0]
+			let p2 = seg[1]
 			let x1 = min(p1[0], p2[0])
 			let y1 = min(p1[1], p2[1])
 			let x2 = max(p1[0], p2[0])
