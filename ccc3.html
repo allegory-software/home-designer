@@ -156,6 +156,7 @@ G.cycles = cycles
 function is_h(seg) { return seg[0][1] == seg[1][1] }
 function is_v(seg) { return seg[0][0] == seg[1][0] }
 function is_null(seg) { return is_h(seg) && is_v(seg) }
+function seg_dir(seg) { return is_h(seg) ? '-' : is_v(seg) ? '|' : '/' }
 
 function seg_x1(seg) { return min(seg[0][0], seg[1][0]) }
 function seg_y1(seg) { return min(seg[0][1], seg[1][1]) }
@@ -307,7 +308,7 @@ function remove_null_segs() {
 }
 
 function remove_angled_segs() {
-	rem_segs(seg => !is_v(seg) && !is_h(seg), 'angled segs')
+	rem_segs(seg => seg_dir(seg) == '/', 'angled segs')
 }
 
 // NOTE: assumes segs are sorted, null segs removed, points deduplicated
@@ -316,7 +317,7 @@ function merge_colinear_segs() {
 		if (p.segs.length == 2) {
 			let s1 = p.segs[0]
 			let s2 = p.segs[1]
-			if (is_v(s1) == is_v(s2)) { // colinear
+			if (is_v(s1) && is_v(s2) || is_h(s1) && is_h(s2)) { // colinear
 				let p1i = adj_point_index(s2, p)
 				let p2  = adj_point(s2, p)
 				log_push()
@@ -480,6 +481,15 @@ function rebuild_adj_refs() {
 let comps = []
 G.comps = comps
 
+function add_comp() {
+	let comp = []
+	comp.i = comps.length
+	comp.cycles = []
+	comp.segs = []
+	comps.push(comp)
+	return comp
+}
+
 // NOTE: needs adj refs
 function find_comps() {
 
@@ -500,10 +510,8 @@ function find_comps() {
 
 	for (let p of ps) {
 		if (!p.visited) {
-			let comp = []
-			comp.i = comps.length
+			let comp = add_comp()
 			let segs = set()
-			comps.push(comp)
 			dfs(p, comp, segs)
 			comp.segs = set_toarray(segs)
 			log('comp {0}: {1}', comp.i, comp.map(p=>p.i).join(' '))
@@ -623,8 +631,8 @@ function angle_sweep(a1, a2, clockwise, circle_sweep) {
 // return p1 from p.adj where the angle at p on (p0,p,p1) is smallest in cw or ccw direction.
 function next_adj(p0, p, clockwise, max_a) {
 	max_a ??= inf
-	if (p.adj.length == 1) // end-point, go back (or forward if first)
-		return 2 <= max_a ? p.adj[0] : null
+	if (p.adj.length == 1 && max_a >= 2) // end-point, go back (or forward if first)
+		return p.adj[0]
 	let x0 = p0 ? p0[0] - p[0] : 0
 	let y0 = p0 ? p0[1] - p[1] : 1
 	let a0 = pseudo_angle(x0, y0)
@@ -645,13 +653,13 @@ function next_adj(p0, p, clockwise, max_a) {
 	return min_p
 }
 
-function closed_walk(first, outer_edge) {
+function closed_walk(first, outer_cycle) {
 	let walk = []
 	let curr = first
 	let prev
 	do {
 		walk.push(curr)
-		let next = next_adj(prev, curr, !prev || outer_edge)
+		let next = next_adj(prev, curr, !prev || outer_cycle)
 		prev = curr
 		curr = next
 	} while (curr != first) // TODO: fix |_ bug
@@ -668,6 +676,7 @@ function extract_cycles_for(comp) {
 			c.comp = comp
 			c.area = abs(polygon_area(c))
 			cycles.push(c)
+			comp.cycles.push(c)
 		}
 		// the first edge is always safe to remove because starting from the leftmost
 		// point means that there cannot be a cycle to the right of that first edge
@@ -680,28 +689,31 @@ function extract_cycles_for(comp) {
 	}
 }
 
-function extract_outer_edge_for(comp) {
+function extract_outer_cycle_for(comp) {
 	let p = left_bottom_point(comp)
 	let c = closed_walk(p, true)
 	c.i = cycles.length
 	c.outer = true
 	c.comp = comp
 	c.area = abs(polygon_area(c))
+	c.reverse()
 	cycles.push(c)
-	comp.outer_edge = c
+	comp.cycles.push(c)
+	comp.outer_cycle = c
 }
 
 function extract_cycles() {
 	cycles.length = 0
 
 	for (let comp of comps)
-		extract_cycles_for(comp)
+		extract_outer_cycle_for(comp)
 	rebuild_adj_refs()
 
 	for (let comp of comps)
-		extract_outer_edge_for(comp)
+		extract_cycles_for(comp)
 	rebuild_adj_refs()
 
+	if (0)
 	for (let c of cycles)
 		log('cycle {0} {2} {3} {4}: {1}', c.i, c.map(p=>p.i).join(' '),
 			is_cw(c) ? 'cw' : 'ccw',
@@ -823,12 +835,13 @@ function offset_poly(ps, d) {
 		let i0 = i-1; let p0; do { p0 = ps[mod(i0--, n)] } while (points_equal(p0, p1))
 		let i2 = i+1; let p2; do { p2 = ps[mod(i2++, n)] } while (points_equal(p2, p1))
 		let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d, out)
-		let op1 = [x1, y1]
+		let [x0, y0] = p1
+		let op1 = [x1 - x0, y1 - y0]
 		op1.p = p1
 		op1.ci = i
 		ops.push(op1)
 		if (x2 != null) {
-			let op2 = [x2, y2]
+			let op2 = [x2 - x0, y2 - y0]
 			op2.p = p1
 			op2.ci = i
 			ops.push(op2)
@@ -854,12 +867,14 @@ function fix_plan() {
 }
 
 function create_edges_for(c) {
-	c.edges = offset_poly(c, (c.outer ? (c.comp.inside ? 10 : 20) : -10))
+	c.edges = offset_poly(c, (c.outer ? (c.comp.inside ? -4 : -12) : -4))
 }
 
 function create_edges() {
 	for (let c of cycles)
 		create_edges_for(c)
+	for (let comp of comps)
+		create_edges_for(comp.outer_cycle)
 }
 
 function load_plan() {
@@ -1011,19 +1026,24 @@ function bump_limit(seg, sign) {
 	}
 	return min_a1
 }
+let BUMP_MARGIN = 40
 function seg_move_ranges(seg) {
 	let min_a = bump_limit(seg, -1)
 	let max_a = bump_limit(seg,  1)
-	let bump_range = [min_a, max_a]
-	let ranges = [bump_range]
+	let ranges = [
+		[min_a + BUMP_MARGIN, max_a - BUMP_MARGIN, 0],
+		[min_a, min_a, BUMP_MARGIN],
+		[max_a, max_a, BUMP_MARGIN],
+	]
 	return ranges
 }
-function seg_move_snap_lines(seg) {
+function seg_move_snap_lines(seg, ranges) {
 	let v = is_v(seg)
 	let as = []
 	for (let seg1 of segs) {
 		if (is_v(seg1) == v) {
 			let a = seg_axis(seg1)
+			if (ranges)
 			as.push(a)
 		} else {
 			//
@@ -1035,12 +1055,12 @@ function closest_move_range(a, ranges) {
 	let min_range
 	let min_d = 1/0
 	for (let range of ranges) {
-		let [a1, a2] = range
+		let [a1, a2, margin] = range
 		if (a >= a1 && a <= a2) { // in range
 			min_range = range
 			break
 		}
-		let d = min(abs(a1 - a), abs(a2 - a)) // distance to range's closest end-point
+		let d = max(0, min(abs(a1 - a), abs(a2 - a)) - margin) // distance to range's closest end-point
 		if (d < min_d) {
 			min_range = range
 			min_d = d
@@ -1054,29 +1074,14 @@ function snap_to_line(a, as) {
 			return a1
 }
 
-function move_seg_start(seg) {
-	log_push()
-	detach_colinear_segs(seg)
-	log_pop('START MOVE SEG: {0}', seg.i)
-}
-
-function move_seg(seg, seg0, ranges, snap_lines, dx, dy) {
-	let a = seg_axis(seg0) + (is_v(seg) ? dx : dy)
-	let snap_range = closest_move_range(a, ranges)
-	let [min_a, max_a] = snap_range
-	a = clamp(a, min_a, max_a)
-	let sa = snap_to_line(a, snap_lines)
-	if (sa != null)
-		a = sa
-	set_seg_axis(seg, a)
-	create_edges()
-	return sa
-}
-
-function move_seg_stop(seg) {
-	log_push()
-	fix_plan()
-	log_pop('STOP MOVE SEG: {0}', seg.i)
+// find the seg in the left, right, top, bottom side around p.
+function seg_around_point(p, sdx, sdy) {
+	let p0 = [p[0] + sdx, p[1] + sdy]
+	let p1 = next_adj(p0, p, 1, 0)
+	// find the seg of (p, p1)
+	for (let seg of p.segs)
+		if (seg[0] == p && seg[1] == p1 || seg[1] == p && seg[0] == p1)
+			return seg
 }
 
 // NOTE: do `ps.push(ps[0], ps[1])` before you call this!
@@ -1105,38 +1110,149 @@ ui.widget('house_plan', {
 
 		let [dstate, dx, dy] = ui.drag(id)
 
-		if (dstate == 'drag') {
-			let hs = ui.hover(id)
-			if (hs) {
-				let seg = hs.get('seg')
-				if (seg) {
-					let cs = ui.captured(id)
-					move_seg_start(seg)
-					pr_log()
-					cs.set('seg', seg)
-					cs.set('seg0', clone(seg))
-					cs.set('ranges', seg_move_ranges(seg))
-					cs.set('snap_lines', seg_move_snap_lines(seg))
+		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
+
+			if (dstate == 'drag') {
+
+				let hs = ui.hover(id)
+				if (hs) {
+
+					let seg = hs.get('seg')
+					let p   = hs.get('p')
+
+					if (seg) { // move seg
+
+						let cs = ui.captured(id)
+						log_push()
+						detach_colinear_segs(seg)
+						log_pop('START MOVE SEG: {0}', seg.i)
+						pr_log()
+						cs.set('action', 'move_seg')
+						cs.set('seg', seg)
+						cs.set('seg0', clone(seg))
+						let ranges = seg_move_ranges(seg)
+						let snap_lines = seg_move_snap_lines(seg, ranges)
+						cs.set('ranges', ranges)
+						cs.set('snap_lines', snap_lines)
+
+					} else if (p) { // clicked on point, action not clear yet
+
+						let cs = ui.captured(id)
+						cs.set('p', p)
+
+					}
 				}
 			}
-		}
 
-		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
 			let cs = ui.captured(id)
-			if (cs) {
+			let action = cs.get('action')
+
+			if (!action && (abs(dx) >= 5 || abs(dy) >= 5)) { // dragged far enough to assume intent to drag.
+
+				// establish direction of drag on x and y axis.
+				let sdx = abs(dx) > 2 * abs(dy) ? sign(dx) : 0 // straight enough
+				let sdy = abs(dy) > 2 * abs(dx) ? sign(dy) : 0 // straight enough
+				if (sdx || sdy) {
+
+					// based on direction of drag, either detach a seg or add a seg, and start resizing it.
+
+					log_push()
+
+					let seg
+					let p = cs.get('p')
+					if (p) {
+						// find seg in the drag direction around p.
+						if (p.segs.length == 1 && is_v(p.segs[0]) == !!sdy) {
+							// p is a free end-point and we're dragging along its main axis: resize it.
+							seg = p.segs[0]
+						} else {
+							// find the seg around p in the direction of drag: that's the segment we want to detach and resize.
+							seg = seg_around_point(p, sdx, sdy)
+							// detach seg at branch point p so we can then resize it by its free end-point.
+							//
+						}
+					}
+
+					if (!seg) { // create new seg, anchored to p or to mouse pos when clicked
+						let x = p ? p[0] : ui.mx0 - 120
+						let y = p ? p[1] : ui.my0 - 120
+						let p1 = add_point(x, y)
+						let p2 = add_point(x + dx * abs(sdx), y + dy * abs(sdy))
+						seg = add_seg(p1, p2)
+					}
+
+					action = 'resize_seg'
+					cs.set('action', action)
+					cs.set('seg', seg)
+					cs.set('sdx', sdx) // restrict resize direction
+					cs.set('sdy', sdy) // restrict resize direction
+
+					fix_plan()
+
+					log_pop('START RESIZE SEG: {0}', seg.i)
+					pr_log()
+
+				}
+			}
+
+			if (action == 'move_seg') {
+
 				let seg        = cs.get('seg')
 				let seg0       = cs.get('seg0')
 				let ranges     = cs.get('ranges')
 				let snap_lines = cs.get('snap_lines')
-				let snap_line = move_seg(seg, seg0, ranges, snap_lines, dx, dy)
-				cs.set('snap_line', snap_line)
-			}
-		}
 
-		if (dstate == 'drop') {
-			let cs = ui.captured(id)
-			move_seg_stop(cs.get('seg'))
-			pr_log()
+				let a = seg_axis(seg0) + (is_v(seg) ? dx : dy)
+				let snap_range = closest_move_range(a, ranges)
+				let [min_a, max_a] = snap_range
+				a = clamp(a, min_a, max_a)
+				let sa = !ui.key('shift') ? snap_to_line(a, snap_lines) : null
+				if (sa != null)
+					a = sa
+				set_seg_axis(seg, a)
+				create_edges()
+				cs.set('snap_line', sa)
+
+			}
+
+			if (action == 'resize_seg') {
+
+				let seg = cs.get('seg')
+				let sdx = cs.get('sdx')
+				let sdy = cs.get('sdy')
+				let p1 = seg[0]
+				let p2 = seg[1]
+				let dx1 = dx * abs(sdx)
+				let dy1 = dy * abs(sdy)
+				if (dx1 || dy1) {
+					p2[0] = p1[0] + dx1
+					p2[1] = p1[1] + dy1
+					create_edges()
+				}
+
+			}
+
+			if (dstate == 'drop') {
+
+				if (action == 'move_seg') {
+
+					let seg = cs.get('seg')
+					log_push()
+					fix_plan()
+					log_pop('STOP MOVE SEG: {0}', seg.i)
+					pr_log()
+
+				} else if (action == 'resize_seg') {
+
+					let seg = cs.get('seg')
+					log_push()
+					fix_plan()
+					log_pop('STOP RESIZE SEG: {0}', seg.i)
+					pr_log()
+
+				}
+			}
+
 		}
 
 		ui.cmd(cmd, id)
@@ -1145,6 +1261,8 @@ ui.widget('house_plan', {
 	draw: function(a, i) {
 
 		let id = a[i+0]
+		let w = 10000
+		let h = 10000
 
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
@@ -1154,38 +1272,141 @@ ui.widget('house_plan', {
 		cx.translate(120, 120)
 		cx.translate(.5, .5)
 
+		// allowed moving areas
+		let ranges = cs && cs.get('ranges')
+		if (ranges) {
+			let moving_seg = cs && cs.get('seg')
+			for (let [a1, a2] of ranges) {
+				let x1, y1, x2, y2
+				if (is_v(moving_seg)) {
+					x1 = a1
+					x2 = a2
+					y1 = 0
+					y2 = h
+				} else {
+					y1 = a1
+					y2 = a2
+					x1 = 0
+					x2 = w
+				}
+				cx.beginPath()
+				if (x2-x1 > 0 && y2-y1 > 0) {
+					cx.rect(x1, y1, x2-x1, y2-y1)
+				} else {
+					cx.moveTo(x1, y1)
+					cx.lineTo(x2, y2)
+				}
+				//cx.setLineDash([6, 3])
+				//cx.strokeStyle = '#555'
+				cx.fillStyle = '#ffffff03'
+				cx.fill()
+				//cx.setLineDash([])
+			}
+		}
+
+		// snap line
 		let sa = cs && cs.get('snap_line')
-		if (sa != null) {
+		if (sa) {
 			let moving_seg = cs && cs.get('seg')
 			let x1, y1, x2, y2
 			if (is_v(moving_seg)) {
 				x1 = sa
 				x2 = sa
 				y1 = 0
-				y2 = 10000
+				y2 = h
 			} else {
 				y1 = sa
 				y2 = sa
 				x1 = 0
-				x2 = 10000
+				x2 = w
 			}
 			cx.beginPath()
 			cx.moveTo(x1, y1)
 			cx.lineTo(x2, y2)
-			cx.setLineDash([6, 3])
+			cx.setLineDash([5, 8])
 			cx.strokeStyle = '#555'
 			cx.stroke()
 			cx.setLineDash([])
 		}
 
-		let hit_seg = cs && cs.get('seg') || hs && hs.get('seg')
+		// walls
+		for (let comp of comps) {
+
+			cx.beginPath()
+
+			for (let c of comp.cycles) {
+
+				if (c.edges) {
+					for (let p of c.edges) {
+						let [x, y] = p
+						let [x0, y0] = p.p
+						x += x0
+						y += y0
+						if (p == c.edges[0])
+							cx.moveTo(x, y)
+						else
+							cx.lineTo(x, y)
+					}
+					cx.closePath()
+
+					if (DEBUG_PLAN)
+					for (let p of c.edges) {
+						let [x, y] = p
+						cx.fillStyle = '#0f0'
+						cx.fillText(c.i+':'+p.ci, x-5, y+5)
+					}
+				}
+
+				if (DEBUG_PLAN)
+				{
+				let [x,y] = poly_center(c)
+				cx.fillStyle = c.outer ? '#39f' : '#99f'
+				cx.fillText(c.i + (c.area ? ' ('+format_kcount(c.area / 1e4)+'m²)' : ''), x, y+5)
+				}
+
+			}
+			cx.strokeStyle = '#666'
+			cx.stroke()
+			cx.fillStyle = '#eee'
+			cx.fill('nonzero')
+		}
+
+		if (hs && hs.has('p')) {
+			let p     = hs.get('p')
+			let sdx   = hs.get('sdx')
+			let sdy   = hs.get('sdy')
+			let p_seg = hs.get('p_seg')
+			let x = p[0] + sdx * 10
+			let y = p[1] + sdy * 10
+			cx.beginPath()
+			for (let i = 0; i < 2; i++) {
+				cx.arc(x + sdx * i * 15, y + sdy * i * 15, 5, 0, 2*PI)
+				cx.closePath()
+			}
+			cx.fillStyle = 'red'
+			cx.fill()
+			// pr(p.i, sdx, sdy, p_seg && p_seg.i)
+		}
+
+		// cursor
+		let action = cs && cs.get('action')
+		let hit_seg = cs && cs.action == 'move_seg' && cs.get('seg') || hs && hs.get('seg')
+		if (hit_seg)
+			ui.set_cursor(is_v(hit_seg) ? 'ew-resize' : 'ns-resize')
+		else if (hs && hs.get('p'))
+			ui.set_cursor(hs.get('p_seg') ? 'alias' : 'copy')
+		//else
+		//	ui.set_cursor('copy')
+
+		// segments
+		if (DEBUG_PLAN)
 		for (let seg of segs) {
 			let p1 = seg[0]
 			let p2 = seg[1]
 			cx.beginPath()
 			cx.moveTo(...p1)
 			cx.lineTo(...p2)
-			cx.strokeStyle = hit_seg == seg ? 'white' : 'gray'
+			cx.strokeStyle = hit_seg == seg ? 'white' : '#333'
 			cx.stroke()
 
 			if (DEBUG_PLAN) {
@@ -1196,34 +1417,7 @@ ui.widget('house_plan', {
 
 		}
 
-		for (let c of cycles) {
-			cx.beginPath()
-			for (let p of c.edges) {
-				if (p == c.edges[0])
-					cx.moveTo(...p)
-				else
-					cx.lineTo(...p)
-			}
-			cx.closePath()
-			cx.strokeStyle = '#555'
-			cx.stroke()
-
-			if (DEBUG)
-			for (let p of c.edges) {
-				let [x, y] = p
-				cx.fillStyle = '#0f0'
-				cx.fillText(c.i+':'+p.ci, x-5, y+5)
-			}
-
-			if (DEBUG_PLAN)
-			{
-			let [x,y] = poly_center(c)
-			cx.fillStyle = c.outer ? '#39f' : '#99f'
-			cx.fillText(c.i + (c.area ? ' ('+format_kcount(c.area / 1e4)+'m²)' : ''), x, y+5)
-			}
-
-		}
-
+		// point numbers
 		if (DEBUG_PLAN)
 		for (let p of ps) {
 			let [x, y] = p
@@ -1237,34 +1431,68 @@ ui.widget('house_plan', {
 	hit: function(a, i) {
 
 		let id = a[i+0]
+		let w = 1000
+		let h = 1000
+
+		if (ui.captured(id))
+			return
 
 		let cx = ui.cx
 		cx.save()
 		cx.translate(120, 120)
 		ui.update_mouse()
 
-		for (let seg of segs) {
-			let p1 = seg[0]
-			let p2 = seg[1]
-			let x1 = min(p1[0], p2[0])
-			let y1 = min(p1[1], p2[1])
-			let x2 = max(p1[0], p2[0])
-			let y2 = max(p1[1], p2[1])
-			if (y1 == y2) {
-				y1 -= 5
-				y2 += 5
-			} else if (x1 == x2) {
-				x1 -= 5
-				x2 += 5
-			} else {
-				continue
-			}
-			if (ui.hit_rect(x1, y1, x2-x1, y2-y1)) {
+		let hit_comp
+		for (let c of comps) {
+			if (ui.hit_bb(...c.bb)) {
+				hit_comp = c
 				let hs = ui.hover(id)
-				hs.set('seg', seg)
+				hs.set('comp', c)
 				break
 			}
 		}
+
+		let hit_p
+		for (let p of (hit_comp ?? ps)) {
+			let dx = ui.mx - p[0]
+			let dy = ui.my - p[1]
+			if (abs(dx) <= 10 && abs(dy) <= 10) {
+				hit_p = p
+				let hs = ui.hover(id)
+				hs.set('p', p) // point to start new seg from
+				break
+			}
+		}
+
+		if (!hit_p)
+			for (let seg of segs) {
+				let p1 = seg[0]
+				let p2 = seg[1]
+				let x1 = min(p1[0], p2[0])
+				let y1 = min(p1[1], p2[1])
+				let x2 = max(p1[0], p2[0])
+				let y2 = max(p1[1], p2[1])
+				if (y1 == y2) {
+					y1 -= 5
+					y2 += 5
+				} else if (x1 == x2) {
+					x1 -= 5
+					x2 += 5
+				} else {
+					continue
+				}
+				if (ui.hit_rect(x1, y1, x2-x1, y2-y1)) {
+					let hs = ui.hover(id)
+					hs.set('seg', seg)
+					break
+				}
+			}
+
+		if (!ui.hovers(id))
+			if (ui.hit_rect(0, 0, w, h)) {
+				let hs = ui.hover(id)
+				//
+			}
 
 		cx.restore()
 		ui.update_mouse()
@@ -1273,7 +1501,7 @@ ui.widget('house_plan', {
 
 })
 
-DEBUG_PLAN = 1
+DEBUG_PLAN = 0
 load_plan()
 pr_log()
 
