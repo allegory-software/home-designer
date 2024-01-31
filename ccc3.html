@@ -1128,7 +1128,6 @@ ui.widget('house_plan', {
 						log_pop('START MOVE SEG: {0}', seg.i)
 						pr_log()
 						cs.set('action', 'move_seg')
-						cs.set('seg', seg)
 						cs.set('seg0', clone(seg))
 						let ranges = seg_move_ranges(seg)
 						let snap_lines = seg_move_snap_lines(seg, ranges)
@@ -1138,7 +1137,6 @@ ui.widget('house_plan', {
 					} else if (p) { // clicked on point, action not clear yet
 
 						let cs = ui.captured(id)
-						cs.set('p', p)
 
 					}
 				}
@@ -1177,13 +1175,18 @@ ui.widget('house_plan', {
 						let x = p ? p[0] : ui.mx0 - 120
 						let y = p ? p[1] : ui.my0 - 120
 						let p1 = add_point(x, y)
-						let p2 = add_point(x + dx * abs(sdx), y + dy * abs(sdy))
+						let p2 = add_point(
+							x + dx * abs(sdx),
+							y + dy * abs(sdy)
+						)
 						seg = add_seg(p1, p2)
+						cs.set('p', p2)
 					}
 
 					action = 'resize_seg'
 					cs.set('action', action)
 					cs.set('seg', seg)
+					cs.set('p0', [...p])
 					cs.set('sdx', sdx) // restrict resize direction
 					cs.set('sdy', sdy) // restrict resize direction
 
@@ -1217,16 +1220,15 @@ ui.widget('house_plan', {
 
 			if (action == 'resize_seg') {
 
-				let seg = cs.get('seg')
+				let p   = cs.get('p')
+				let p0  = cs.get('p0')
 				let sdx = cs.get('sdx')
 				let sdy = cs.get('sdy')
-				let p1 = seg[0]
-				let p2 = seg[1]
 				let dx1 = dx * abs(sdx)
 				let dy1 = dy * abs(sdy)
 				if (dx1 || dy1) {
-					p2[0] = p1[0] + dx1
-					p2[1] = p1[1] + dy1
+					p[0] = p0[0] + dx1
+					p[1] = p0[1] + dy1
 					create_edges()
 				}
 
