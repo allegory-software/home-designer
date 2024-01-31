@@ -531,7 +531,7 @@ function comp_bbox(comp) {
 		bx1 = min(bx1, x1, x2)
 		bx2 = max(bx2, x1, x2)
 		by1 = min(by1, y1, y2)
-		by2 = max(by1, y1, y2)
+		by2 = max(by2, y1, y2)
 	}
 	return [bx1, by1, bx2, by2]
 }
@@ -540,6 +540,27 @@ function bbox_inside(cbb, pbb) {
 	let [px1, py1, px2, py2] = pbb
 	let [cx1, cy1, cx2, cy2] = cbb
 	return cx1 >= px1 && cx2 <= px2 && cy1 >= py1 && cy2 <= py2
+}
+
+function point_inside(p, ps) {
+	let [x, y] = p
+	let inside = false
+	for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
+		let xi = ps[i][0]
+		let yi = ps[i][1]
+		let xj = ps[j][0]
+		let yj = ps[j][1]
+		let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+		if (intersect)
+			inside = !inside
+	}
+	return inside
+}
+
+function comp_inside(c, p) {
+	if (!bbox_inside(c.bb, p.bb))
+	 	return false
+	return point_inside(c[0], p.outer_cycle)
 }
 
 function find_inside_comps() {
@@ -553,7 +574,7 @@ function find_inside_comps() {
 		for (let p of comps) {
 			if (p == c)
 				continue
-			if (bbox_inside(c.bb, p.bb)) {
+			if (comp_inside(c, p)) {
 				c.inside = true
 				log('comp {0} is inside', c.i)
 			}
@@ -861,8 +882,8 @@ function fix_plan() {
 	remove_isolated_points()
 	rebuild_adj_refs()
 	find_comps()
-	find_inside_comps()
 	extract_cycles()
+	find_inside_comps()
 	create_edges()
 }
 
@@ -1180,7 +1201,8 @@ ui.widget('house_plan', {
 							y + dy * abs(sdy)
 						)
 						seg = add_seg(p1, p2)
-						cs.set('p', p2)
+						p = p2
+						cs.set('p', p)
 					}
 
 					action = 'resize_seg'
