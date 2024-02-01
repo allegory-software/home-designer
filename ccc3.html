@@ -1229,17 +1229,35 @@ ui.widget('house_plan', {
 				let ranges     = cs.get('ranges')
 				let snap_lines = cs.get('snap_lines')
 
-				let a = seg_axis(seg0) + (is_v(seg) ? dx : dy)
-				let snap_range = closest_move_range(a, ranges)
-				let [min_a, max_a] = snap_range
-				a = clamp(a, min_a, max_a)
-				let sa = !ui.key('shift') ? snap_to_line(a, snap_lines) : null
-				if (sa != null)
-					a = sa
-				set_seg_axis(seg, a)
-				create_edges()
-				cs.set('snap_line', sa)
+				if (seg[0].segs.length == 1 && seg[1].segs.length == 1) { // move freely
 
+					let v = is_v(seg0)
+					let a = seg_axis(seg0) + (v ? dx : dy)
+					let snap_range = closest_move_range(a, ranges)
+					let [min_a, max_a] = snap_range
+					a = clamp(a, min_a, max_a)
+
+					// TODO: snap to main axis too
+
+					seg[0][0] =  v ? a : seg0[0][0] + dx
+					seg[1][0] =  v ? a : seg0[1][0] + dx
+					seg[0][1] = !v ? a : seg0[0][1] + dy
+					seg[1][1] = !v ? a : seg0[1][1] + dy
+
+				} else { // move on cross axis
+
+					let a = seg_axis(seg0) + (is_v(seg) ? dx : dy)
+					let snap_range = closest_move_range(a, ranges)
+					let [min_a, max_a] = snap_range
+					a = clamp(a, min_a, max_a)
+					let sa = !ui.key('shift') ? snap_to_line(a, snap_lines) : null
+					if (sa != null)
+						a = sa
+					set_seg_axis(seg, a)
+					create_edges()
+					cs.set('snap_line', sa)
+
+				}
 			}
 
 			if (action == 'resize_seg') {
@@ -1431,8 +1449,12 @@ ui.widget('house_plan', {
 		// cursor
 		let action = cs && cs.get('action')
 		let hit_seg = cs && cs.action == 'move_seg' && cs.get('seg') || hs && hs.get('seg')
-		if (hit_seg)
-			ui.set_cursor(is_v(hit_seg) ? 'ew-resize' : 'ns-resize')
+		if (hit_seg) {
+			if (hit_seg[0].segs.length == 1 && hit_seg[1].segs.length == 1)
+				ui.set_cursor('move')
+			else
+				ui.set_cursor(is_v(hit_seg) ? 'ew-resize' : 'ns-resize')
+		}
 		else if (hs && hs.get('p'))
 			ui.set_cursor(hs.get('p_seg') ? 'alias' : 'copy')
 		//else
