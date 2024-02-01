@@ -1168,11 +1168,11 @@ ui.widget('house_plan', {
 			let cs = ui.captured(id)
 			let action = cs.get('action')
 
-			if (!action && (abs(dx) >= 5 || abs(dy) >= 5)) { // dragged far enough to assume intent to drag.
+			if (!action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
 
 				// establish direction of drag on x and y axis.
-				let sdx = abs(dx) > 2 * abs(dy) ? sign(dx) : 0 // straight enough
-				let sdy = abs(dy) > 2 * abs(dx) ? sign(dy) : 0 // straight enough
+				let sdx = abs(dx) > 1.5 * abs(dy) ? sign(dx) : 0 // straight enough
+				let sdy = abs(dy) > 1.5 * abs(dx) ? sign(dy) : 0 // straight enough
 				if (sdx || sdy) {
 
 					// based on direction of drag, either detach a seg or add a seg, and start resizing it.
@@ -1493,8 +1493,8 @@ ui.widget('house_plan', {
 	hit: function(a, i) {
 
 		let id = a[i+0]
-		let w = 1000
-		let h = 1000
+		let w = 10000
+		let h = 10000
 
 		if (ui.captured(id))
 			return
@@ -1504,57 +1504,54 @@ ui.widget('house_plan', {
 		cx.translate(120, 120)
 		ui.update_mouse()
 
-		let hit_comp
-		for (let c of comps) {
-			if (ui.hit_bb(...c.bb)) {
-				hit_comp = c
-				let hs = ui.hover(id)
-				hs.set('comp', c)
-				break
-			}
-		}
+		let hs = ui.hit_rect(0, 0, w, h) && ui.hover(id)
 
-		let hit_p
-		for (let p of (hit_comp ?? ps)) {
-			let dx = ui.mx - p[0]
-			let dy = ui.my - p[1]
-			if (abs(dx) <= 10 && abs(dy) <= 10) {
-				hit_p = p
-				let hs = ui.hover(id)
-				hs.set('p', p) // point to start new seg from
-				break
-			}
-		}
+		if (hs) {
 
-		if (!hit_p)
-			for (let seg of segs) {
-				let p1 = seg[0]
-				let p2 = seg[1]
-				let x1 = min(p1[0], p2[0])
-				let y1 = min(p1[1], p2[1])
-				let x2 = max(p1[0], p2[0])
-				let y2 = max(p1[1], p2[1])
-				if (y1 == y2) {
-					y1 -= 5
-					y2 += 5
-				} else if (x1 == x2) {
-					x1 -= 5
-					x2 += 5
-				} else {
-					continue
-				}
-				if (ui.hit_rect(x1, y1, x2-x1, y2-y1)) {
-					let hs = ui.hover(id)
-					hs.set('seg', seg)
+			let hit_comp
+			for (let c of comps) {
+				if (ui.hit_bb(...c.bb)) {
+					hit_comp = c
+					hs.set('comp', c)
 					break
 				}
 			}
 
-		if (!ui.hovers(id))
-			if (ui.hit_rect(0, 0, w, h)) {
-				let hs = ui.hover(id)
-				//
+			let hit_p
+			for (let p of (hit_comp ?? ps)) {
+				let dx = ui.mx - p[0]
+				let dy = ui.my - p[1]
+				if (abs(dx) <= 10 && abs(dy) <= 10) {
+					hit_p = p
+					hs.set('p', p) // point to start new seg from
+					break
+				}
 			}
+
+			if (!hit_p)
+				for (let seg of segs) {
+					let p1 = seg[0]
+					let p2 = seg[1]
+					let x1 = min(p1[0], p2[0])
+					let y1 = min(p1[1], p2[1])
+					let x2 = max(p1[0], p2[0])
+					let y2 = max(p1[1], p2[1])
+					if (y1 == y2) {
+						y1 -= 5
+						y2 += 5
+					} else if (x1 == x2) {
+						x1 -= 5
+						x2 += 5
+					} else {
+						continue
+					}
+					if (ui.hit_rect(x1, y1, x2-x1, y2-y1)) {
+						hs.set('seg', seg)
+						break
+					}
+				}
+
+		}
 
 		cx.restore()
 		ui.update_mouse()
