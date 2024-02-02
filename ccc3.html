@@ -318,7 +318,7 @@ function polygon_area(ps) {
 }
 
 function extract_cycles_for(comp) {
-	let ps = [...comp]
+	let ps = [...comp.ps]
 	while (ps.length > 0) {
 		let p = left_bottom_point(ps)
 		let c = closed_walk(p)
@@ -340,7 +340,7 @@ function extract_cycles_for(comp) {
 }
 
 function extract_outer_cycle_for(comp) {
-	let p = left_bottom_point(comp)
+	let p = left_bottom_point(comp.ps)
 	let c = closed_walk(p, true)
 	c.i = gen_id('cycle')
 	c.outer = true
@@ -724,8 +724,9 @@ function house_plan(t) {
 		// finding graph components --------------------------------------------
 
 		function add_comp() {
-			let comp = []
+			let comp = {}
 			comp.i = comps.length
+			comp.ps = []
 			comp.cycles = []
 			comp.segs = []
 			comps.push(comp)
@@ -754,9 +755,9 @@ function house_plan(t) {
 				if (!p.visited) {
 					let comp = add_comp()
 					let segs = set()
-					dfs(p, comp, segs)
+					dfs(p, comp.ps, segs)
 					comp.segs = set_toarray(segs)
-					log('comp {0}: {1}', comp.i, comp.map(p=>p.i).join(' '))
+					log('comp {0}: {1}', comp.i, comp.ps.map(p=>p.i).join(' '))
 				}
 			}
 
@@ -846,21 +847,22 @@ function house_plan(t) {
 
 		function extract_cycles() {
 
-			for (let comp of comps)
-				extract_outer_cycle_for(comp)
+			for (let c of comps)
+				extract_outer_cycle_for(c)
 			rebuild_adj_refs(ps)
 
-			for (let comp of comps)
-				extract_cycles_for(comp)
+			for (let c of comps)
+				extract_cycles_for(c)
 			rebuild_adj_refs(ps)
 
 			if (0)
-			for (let comp of comps)
+			for (let co of comps)
 				for (let c of comp.cycles)
-					log('cycle {0} {2} {3} {4}: {1}', c.i, c.map(p=>p.i).join(' '),
+					log('cycle {0}/{1} {2} {3} {4}: {5}', co.i, c.i,
 						is_cw(c) ? 'cw' : 'ccw',
 						c.outer ? 'outer' : '',
 						c.inside ? 'inside' : '',
+						c.map(p=>p.i).join(' ')
 					)
 		}
 
@@ -1126,7 +1128,7 @@ function house_plan(t) {
 		}
 		level_plan.start_move_seg = start_move_seg
 
-		function start_resize_seg(p, dx, dy, sdx, sdy) {
+		function start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy) {
 
 			// based on direction of drag, either detach a seg or add a seg, and start resizing it.
 			log_push()
@@ -1146,8 +1148,8 @@ function house_plan(t) {
 			}
 
 			if (!seg) { // create new seg, anchored to p or to mouse pos when clicked
-				let x = p ? p[0] : ui.mx0
-				let y = p ? p[1] : ui.my0
+				let x = p ? p[0] : mx0
+				let y = p ? p[1] : my0
 				let p1 = add_point(x, y)
 				let p2 = add_point(
 					x + dx * abs(sdx),
@@ -1253,12 +1255,14 @@ function house_plan(t) {
 
 let scale_group = memoize(function(name) {
 	let g = {}
-	let st = 3 // thickness of wall line stroke
-	let scale, x0, y0
-	g.x = x => x0 + round(x * scale)
-	g.y = y => y0 + round(y * scale)
-	g.plan_x = x => (x - x0) / scale
-	g.plan_y = y => (y - y0) / scale
+	let st = 7 // thickness of wall line stroke at 1:1 scale
+	let scale
+	g.d = d => round(d * scale)
+	g.x = x => round(x * scale)
+	g.y = y => round(y * scale)
+	g.plan_x = x => x/ scale
+	g.plan_y = y => y / scale
+	let out = []
 	g.scale_to_fit = function(bb, w, h) {
 		w -= 2*st
 		h -= 2*st
@@ -1270,12 +1274,11 @@ let scale_group = memoize(function(name) {
 			w / bw,
 			h / bh
 		)
-		x0 = -round(x1 * scale) + st
-		y0 = -round(y1 * scale) + st
-
 		g.scale = scale
-		g.x0 = x0
-		g.y0 = y0
+		g.line_width = 1 + ((st * scale >> 1) * 2)
+		out[0] = -round(x1 * scale) + st
+		out[1] = -round(y1 * scale) + st
+		return out
 	}
 	g.reset_scale = function() {
 		scale = 1/0
@@ -1287,11 +1290,19 @@ let scale_group = memoize(function(name) {
 // plan view -----------------------------------------------------------------
 
 let PLAN_VIEW_ID    = ui.S-1
-let PLAN_VIEW_PLAN  = ui.S+0
+let PLAN_VIEW_STATE = ui.S+0
 
 ui.box_widget('plan_view', {
 
 	create: function(cmd, id, plan, fr, align, valign, min_w, min_h) {
+
+		let s = ui.state(id)
+		let state = s.get('state')
+		if (!state) {
+			state = {}
+			s.set('state', state)
+		}
+		state.plan = plan
 
 		let [dstate, dx, dy] = ui.drag(id)
 
@@ -1335,7 +1346,9 @@ ui.box_widget('plan_view', {
 				if (sdx || sdy) {
 					action = 'resize_seg'
 					cs.set('action', action)
-					cs.set('resize_seg', plan.start_resize_seg(cs.get('p'), dx, dy, sdx, sdy))
+					let mx0 = cs.get('mx0')
+					let my0 = cs.get('my0')
+					cs.set('resize_seg', plan.start_resize_seg(cs.get('p'), mx0, my0, dx, dy, sdx, sdy))
 				}
 
 			}
@@ -1357,30 +1370,48 @@ ui.box_widget('plan_view', {
 		}
 
 		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
-				id, plan,
+				id, state,
 			)
 	},
 
 	after_position: function(a, i, axis)	{
-		let plan = a[i+PLAN_VIEW_PLAN]
+		let x00   = a[i+0]
+		let y00   = a[i+1]
+		let w     = a[i+2]
+		let h     = a[i+3]
+		let id    = a[i+PLAN_VIEW_ID]
+		let state = a[i+PLAN_VIEW_STATE]
 		let sg = scale_group('editor')
 		if (!axis) {
 			sg.reset_scale()
 		} else {
-			let w = a[i+2]
-			let h = a[i+3]
-			sg.scale_to_fit(plan.bb, w, h)
+			let [x0, y0] = sg.scale_to_fit(state.plan.bb, w, h)
+			state.x0 = x0
+			state.y0 = y0
+			// pick what parts of the plan to send over the network for drawing
+			// and in which format (the plan has arrays with props which is not valid json).
+			let plan = state.plan
+			state.plan = 0 // don't send this
+			state.comps = plan.comps
+			state.segs = plan.segs // TODO: remove this from draw stream
+			if (DEBUG_PLAN)
+				state.ps = plan.ps
+			let cs = ui.captured(id)
+			if (cs) {
+				cs.set('mx0', sg.plan_x(ui.mx0 - x00 - x0))
+				cs.set('my0', sg.plan_y(ui.my0 - y00 - y0))
+			}
 		}
 	},
 
 	draw: function(a, i) {
 
-		let x00 = a[i+0]
-		let y00 = a[i+1]
-		let w   = a[i+2]
-		let h   = a[i+3]
+		let x00   = a[i+0]
+		let y00   = a[i+1]
+		let w     = a[i+2]
+		let h     = a[i+3]
 		let id    = a[i+PLAN_VIEW_ID]
-		let plan  = a[i+PLAN_VIEW_PLAN]
+		let state = a[i+PLAN_VIEW_STATE]
 
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
@@ -1390,6 +1421,7 @@ ui.box_widget('plan_view', {
 		let cx = ui.cx
 		cx.save()
 		cx.translate(x00, y00)
+		cx.translate(state.x0, state.y0)
 		cx.translate(.5, .5)
 
 		// allowed moving areas
@@ -1451,7 +1483,7 @@ ui.box_widget('plan_view', {
 
 
 		// walls
-		for (let comp of plan.comps) {
+		for (let comp of state.comps) {
 
 			cx.beginPath()
 
@@ -1460,8 +1492,8 @@ ui.box_widget('plan_view', {
 					for (let dp of c.edges) {
 						let [dx, dy] = dp
 						let [x0, y0] = dp.p
-						let x = sg.x(x0 + dx)
-						let y = sg.y(y0 + dy)
+						let x = sg.x(x0) + sg.d(dx)
+						let y = sg.y(y0) + sg.d(dy)
 						if (dp == c.edges[0])
 							cx.moveTo(x, y)
 						else
@@ -1483,7 +1515,7 @@ ui.box_widget('plan_view', {
 				x.fill()
 				cx.wall_pattern = cx.createPattern(c, 'repeat')
 			}
-			cx.lineWidth = DEBUG_PLAN ? 1 : 5
+			cx.lineWidth = DEBUG_PLAN ? 1 : sg.line_width
 			cx.strokeStyle = '#fff'
 			cx.stroke()
 			cx.lineWidth = 1
@@ -1492,7 +1524,7 @@ ui.box_widget('plan_view', {
 		}
 
 		if (DEBUG_PLAN)
-		for (let c of plan.comps) {
+		for (let c of state.comps) {
 
 			let [x,y] = poly_center(c)
 			cx.fillStyle = c.outer ? '#39f' : '#99f'
@@ -1503,8 +1535,8 @@ ui.box_widget('plan_view', {
 				for (let dp of c.edges) {
 					let [dx, dy] = dp
 					let [x0, y0] = dp.p
-					let x = sg.x(x0 + dx) - 5
-					let y = sg.y(y0 + dy) + 5
+					let x = sg.x(x0) + sg.d(dx) - 5
+					let y = sg.y(y0) + sg.d(dy) + 5
 					cx.fillStyle = '#0f0'
 					cx.fillText(c.i+'/'+dp.ci, x, y)
 				}
@@ -1545,7 +1577,7 @@ ui.box_widget('plan_view', {
 
 		// segments
 		if (DEBUG_PLAN)
-		for (let seg of plan.segs) {
+		for (let seg of state.segs) {
 			let p1 = seg[0]
 			let p2 = seg[1]
 			cx.beginPath()
@@ -1567,7 +1599,7 @@ ui.box_widget('plan_view', {
 
 		// point numbers
 		if (DEBUG_PLAN)
-		for (let p of plan.ps) {
+		for (let p of state.ps) {
 			let [x0, y0] = p
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
@@ -1580,12 +1612,12 @@ ui.box_widget('plan_view', {
 
 	hit: function(a, i) {
 
-		let x00 = a[i+0]
-		let y00 = a[i+1]
-		let w   = a[i+2]
-		let h   = a[i+3]
-		let id   = a[i+PLAN_VIEW_ID]
-		let plan = a[i+PLAN_VIEW_PLAN]
+		let x00   = a[i+0]
+		let y00   = a[i+1]
+		let w     = a[i+2]
+		let h     = a[i+3]
+		let id    = a[i+PLAN_VIEW_ID]
+		let state = a[i+PLAN_VIEW_STATE]
 
 		if (ui.captured(id))
 			return
@@ -1598,12 +1630,13 @@ ui.box_widget('plan_view', {
 
 		cx.save()
 		cx.translate(x00, y00)
+		cx.translate(state.x0, state.y0)
 		ui.update_mouse()
 
 		if (hs) {
 
 			let hit_comp
-			for (let c of plan.comps) {
+			for (let c of state.comps) {
 				let [x1, y1, x2, y2] = c.bb
 				x1 = sg.x(x1)
 				x2 = sg.x(x2)
@@ -1617,18 +1650,19 @@ ui.box_widget('plan_view', {
 			}
 
 			let hit_p
-			for (let p of (hit_comp ?? plan.ps)) {
-				let dx = ui.mx - sg.x(p[0])
-				let dy = ui.my - sg.y(p[1])
-				if (abs(dx) <= 10 && abs(dy) <= 10) {
-					hit_p = p
-					hs.set('p', p) // point to start new seg from
-					break
+			if (hit_comp)
+				for (let p of hit_comp.ps) {
+					let dx = ui.mx - sg.x(p[0])
+					let dy = ui.my - sg.y(p[1])
+					if (abs(dx) <= 10 && abs(dy) <= 10) {
+						hit_p = p
+						hs.set('p', p) // point to start new seg from
+						break
+					}
 				}
-			}
 
 			if (!hit_p)
-				for (let seg of plan.segs) {
+				for (let seg of state.segs) {
 					let p1 = seg[0]
 					let p2 = seg[1]
 					let x1 = sg.x(min(p1[0], p2[0]))
