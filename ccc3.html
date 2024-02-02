@@ -1175,7 +1175,8 @@ function house_plan(t) {
 				if (move_freely) {
 
 					let a = seg_axis(seg0) + da
-					a = snap_to_line(a, snap_lines) ?? a
+					let sa = snap_to_line(a, snap_lines) ?? a
+					a = sa ?? a
 
 					// snap both end-points on main-axis.
 					let m1 = seg_m1(seg0) + dm
@@ -1197,14 +1198,20 @@ function house_plan(t) {
 					seg[0][1] = !v ? a : m1s ?? m1
 					seg[1][1] = !v ? a : m2s ?? m2
 
+					// TODO: we have 2 snap lines damn it
+					s.snap_line = sa
+					s.snap_line_is_v = v
+
 				} else { // move on cross axis
 
 					let a = seg_axis(seg0) + (v ? dx : dy)
-					let sa = snap_to_ranges(a, ranges, snap_lines) ?? a
+					let sa = snap_to_ranges(a, ranges, snap_lines)
 					a = sa ?? a
 					set_seg_axis(seg, a)
 					create_edges()
+
 					s.snap_line = sa
+					s.snap_line_is_v = v
 
 				}
 
@@ -1262,7 +1269,7 @@ function house_plan(t) {
 			let ranges = seg_resize_ranges(seg, p)
 			let snap_lines = seg_resize_snap_lines(seg, true)
 
-			let s = {}
+			let s = {seg: seg}
 
 			s.resize = function(dx, dy) {
 				let x1 = p0[0] + dx * abs(sdx)
@@ -1276,12 +1283,12 @@ function house_plan(t) {
 					x1 = a
 				else
 					y1 = a
-				create_edges()
-				s.snap_line = sa
-
 				p[0] = x1
 				p[1] = y1
 				create_edges()
+
+				s.snap_line = sa
+				s.snap_line_is_v = !is_v(seg)
 			}
 
 			s.stop = function() {
@@ -1454,16 +1461,25 @@ ui.box_widget('plan_view', {
 					cs.set('action', action)
 					let mx0 = cs.get('mx0')
 					let my0 = cs.get('my0')
-					cs.set('resize_seg', plan.start_resize_seg(cs.get('p'), mx0, my0, dx, dy, sdx, sdy))
+					let rstate = plan.start_resize_seg(cs.get('p'), mx0, my0, dx, dy, sdx, sdy)
+					cs.set('resize_seg', rstate)
 				}
 
 			}
 
-			if (action == 'move_seg')
-				cs.get('move_seg').move(dx, dy)
+			if (action == 'move_seg') {
+				let mstate = cs.get('move_seg')
+				mstate.move(dx, dy)
+				state.snap_line      = mstate.snap_line
+				state.snap_line_is_v = mstate.snap_line_is_v
+			}
 
-			if (action == 'resize_seg')
-				cs.get('resize_seg').resize(dx, dy)
+			if (action == 'resize_seg') {
+				let rstate = cs.get('resize_seg')
+				rstate.resize(dx, dy)
+				state.snap_line      = rstate.snap_line
+				state.snap_line_is_v = rstate.snap_line_is_v
+			}
 
 			if (dstate == 'drop') {
 				if (action == 'move_seg') {
@@ -1471,6 +1487,8 @@ ui.box_widget('plan_view', {
 				} else if (action == 'resize_seg') {
 					cs.get('resize_seg').stop()
 				}
+				state.snap_line      = null
+				state.snap_line_is_v = null
 			}
 
 		}
@@ -1563,11 +1581,10 @@ ui.box_widget('plan_view', {
 		}
 
 		// snap line
-		let sa = cs?.get('move_seg')?.snap_line
+		let sa = state.snap_line
 		if (sa) {
-			let moving_seg = cs?.get('seg')
 			let x1, y1, x2, y2
-			if (is_v(moving_seg)) {
+			if (state.snap_line_is_v) {
 				x1 = sg.x(sa)
 				x2 = sg.x(sa)
 				y1 = 0
