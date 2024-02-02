@@ -175,22 +175,31 @@ function offset_corner(p0, p1, p2, d, out) {
 function offset_poly(ps, d) {
 	let ops = []
 	let out = []
-	for (let i = 0, n = ps.length; i < n; i++) {
-		let p1 = ps[i]
-		// skip over null segments that can't project a _|_.
-		let i0 = i-1; let p0; do { p0 = ps[mod(i0--, n)] } while (points_equal(p0, p1))
-		let i2 = i+1; let p2; do { p2 = ps[mod(i2++, n)] } while (points_equal(p2, p1))
-		let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d, out)
-		let [x0, y0] = p1
-		let op1 = [x1 - x0, y1 - y0]
-		op1.p = p1
-		op1.ci = i
-		ops.push(op1)
-		if (x2 != null) {
-			let op2 = [x2 - x0, y2 - y0]
-			op2.p = p1
-			op2.ci = i
-			ops.push(op2)
+	if (ps.length == 2 && points_equal(ps[0], ps[1])) { // single null seg: make a square
+		let i = 0
+		for (let op of [[-d, -d], [d, -d], [d, d], [-d, d]]) {
+			op.p = ps[0]
+			op.ci = i++
+			ops.push(op)
+		}
+	} else {
+		for (let i = 0, n = ps.length; i < n; i++) {
+			let p1 = ps[i]
+			// skip over null segments that can't project a _|_.
+			let i0 = i-1; let p0; do { p0 = ps[mod(i0--, n)] } while (points_equal(p0, p1))
+			let i2 = i+1; let p2; do { p2 = ps[mod(i2++, n)] } while (points_equal(p2, p1))
+			let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d, out)
+			let [x0, y0] = p1
+			let op1 = [x1 - x0, y1 - y0]
+			op1.p = p1
+			op1.ci = i
+			ops.push(op1)
+			if (x2 != null) {
+				let op2 = [x2 - x0, y2 - y0]
+				op2.p = p1
+				op2.ci = i
+				ops.push(op2)
+			}
 		}
 	}
 	return ops
@@ -1169,13 +1178,11 @@ function house_plan(t) {
 			let s = {}
 
 			s.resize = function(dx, dy) {
-				let dx1 = dx * abs(sdx)
-				let dy1 = dy * abs(sdy)
-				if (dx1 || dy1) {
-					p[0] = p0[0] + dx1
-					p[1] = p0[1] + dy1
-					create_edges()
-				}
+				let x1 = p0[0] + dx * abs(sdx)
+				let y1 = p0[1] + dy * abs(sdy)
+				p[0] = x1
+				p[1] = y1
+				create_edges()
 			}
 
 			s.stop = function() {
