@@ -402,6 +402,9 @@ function adj_point(seg, p) {
 	return assert(seg[adj_point_index(seg, p)])
 }
 
+function seg_p1(seg) { let mi = is_v(seg) ? 1 : 0; return seg[seg[0][mi] < seg[1][mi] ? 0 : 1] }
+function seg_p2(seg) { let mi = is_v(seg) ? 1 : 0; return seg[seg[0][mi] < seg[1][mi] ? 1 : 0] }
+
 function normalize_seg(seg) {
 	let M = is_v(seg) ? 1 : 0
 	let p1 = seg[0]
@@ -826,7 +829,7 @@ function house_plan(t) {
 		function comp_inside(c, p) {
 			if (!bb_inside(c.bb, p.bb))
 				return false
-			return point_inside(c[0], p.outer_cycle)
+			return point_inside(c.ps[0], p.outer_cycle)
 		}
 
 		function find_inside_comps() {
@@ -996,7 +999,7 @@ function house_plan(t) {
 			return !(am2 <= bm1 || bm2 <= am1)
 		}
 
-		function bump_limit(seg, sign) {
+		function seg_move_bump_limit(seg, sign) {
 			let v = is_v(seg)
 			let a = seg_axis(seg)
 			let min_a1 = sign * 1/0
@@ -1020,10 +1023,10 @@ function house_plan(t) {
 			}
 			return min_a1
 		}
-		let BUMP_MARGIN = 40
+		let BUMP_MARGIN = 35
 		function seg_move_ranges(seg) {
-			let min_a = bump_limit(seg, -1)
-			let max_a = bump_limit(seg,  1)
+			let min_a = seg_move_bump_limit(seg, -1)
+			let max_a = seg_move_bump_limit(seg,  1)
 			let ranges = [
 				[min_a + BUMP_MARGIN, max_a - BUMP_MARGIN, 0],
 				[min_a, min_a, BUMP_MARGIN],
@@ -1031,21 +1034,83 @@ function house_plan(t) {
 			]
 			return ranges
 		}
-		function seg_move_snap_lines(seg, ranges) {
+		function seg_resize_bump_limit(seg, p, sign) {
+			let v = is_v(seg)
+			let a = p[v ? 1 : 0]
+			let m = p[v ? 0 : 1]
+			let min_a1 = sign * 1/0
+			for (let seg1 of segs) {
+				if (is_v(seg1) != v) {
+					let a1 = seg_axis(seg1)
+					if (sign * a1 > sign * a && sign * a1 < sign * min_a1) {
+						let m1 = seg_m1(seg1)
+						let m2 = seg_m2(seg1)
+						if (m >= m1 && m <= m2)
+							min_a1 = a1
+					}
+				}
+			}
+			return min_a1
+		}
+		function seg_move_m1_ranges(seg) {
+			normalize_seg(seg)
+			let min_a = seg_resize_bump_limit(seg, seg_p1(seg), -1)
+			let max_a = seg_resize_bump_limit(seg, seg_p2(seg),  1) - seg_m1(seg)
+			let ranges = [
+				[min_a + BUMP_MARGIN, max_a - BUMP_MARGIN, 0],
+				[min_a, min_a, BUMP_MARGIN],
+				[max_a, max_a, BUMP_MARGIN],
+			]
+			return ranges
+		}
+		function seg_resize_ranges(seg, p) {
+			let min_a = seg_resize_bump_limit(seg, p, -1)
+			let max_a = seg_resize_bump_limit(seg, p,  1)
+			let ranges = [
+				[min_a + BUMP_MARGIN, max_a - BUMP_MARGIN, 0],
+				[min_a, min_a, BUMP_MARGIN],
+				[max_a, max_a, BUMP_MARGIN],
+			]
+			return ranges
+		}
+		function seg_move_snap_lines(seg, include_seg) {
 			let v = is_v(seg)
 			let as = []
 			for (let seg1 of segs) {
+				if (!include_seg && seg1 == seg)
+					continue
 				if (is_v(seg1) == v) {
+					// snap to parallel segs
 					let a = seg_axis(seg1)
-					if (ranges)
 					as.push(a)
-				} else {
-					//
 				}
 			}
+			// snap to end-points
+			for (let p of ps) {
+				if (p.segs.length == 1) {
+					if (!include_seg && p.segs[0] == seg)
+						continue
+					as.push(p[v ? 0 : 1])
+				}
+			}
+			as.sort()
+			uniq_sorted(as)
 			return as
 		}
-		function closest_move_range(a, ranges) {
+		function seg_resize_snap_lines(seg, include_seg) {
+			let mi = is_v(seg) ? 1 : 0
+			let ms = []
+			for (let p of ps) {
+				if (!include_seg && (seg[0] == p || seg[1] == p))
+					continue
+				let m = p[mi]
+				ms.push(m)
+			}
+			ms.sort()
+			uniq_sorted(ms)
+			return ms
+		}
+		function closest_range(a, ranges) {
 			let min_range
 			let min_d = 1/0
 			for (let range of ranges) {
@@ -1064,8 +1129,14 @@ function house_plan(t) {
 		}
 		function snap_to_line(a, as) {
 			for (let a1 of as)
-				if (abs(a - a1) <= 5)
+				if (abs(a - a1) <= 20)
 					return a1
+		}
+		function snap_to_ranges(a, ranges, snap_lines) {
+			let snap_range = closest_range(a, ranges)
+			let [min_a, max_a] = snap_range
+			a = clamp(a, min_a, max_a)
+			return !ui.key('shift') ? snap_to_line(a, snap_lines) : null
 		}
 
 		// find the seg in the left, right, top, bottom side around p.
@@ -1080,44 +1151,57 @@ function house_plan(t) {
 
 		function start_move_seg(seg) {
 
-			let seg0, ranges, snap_lines
-
 			log_push()
+
 			detach_colinear_segs(seg)
+
 			log_pop('START MOVE SEG: {0}', seg.i)
 			pr_log()
-			seg0 = [[...seg[0]], [...seg[1]]]
-			ranges = seg_move_ranges(seg)
-			snap_lines = seg_move_snap_lines(seg, ranges)
+
+			let move_freely = seg[0].segs.length == 1 && seg[1].segs.length == 1
+			let seg0 = [[...seg[0]], [...seg[1]]]
+			let ranges = seg_move_ranges(seg)
+			let snap_lines = seg_move_snap_lines(seg, !move_freely)
+			let v = is_v(seg0)
+			let m_snap_lines = move_freely && seg_resize_snap_lines(seg, false)
 
 			let s = {}
 
 			s.move = function(dx, dy) {
 
-				if (seg[0].segs.length == 1 && seg[1].segs.length == 1) { // move freely
+				let dm = v ? dy : dx
+				let da = v ? dx : dy
 
-					let v = is_v(seg0)
-					let a = seg_axis(seg0) + (v ? dx : dy)
-					let snap_range = closest_move_range(a, ranges)
-					let [min_a, max_a] = snap_range
-					a = clamp(a, min_a, max_a)
+				if (move_freely) {
 
-					// TODO: snap to main axis too
+					let a = seg_axis(seg0) + da
+					a = snap_to_line(a, snap_lines) ?? a
 
-					seg[0][0] =  v ? a : seg0[0][0] + dx
-					seg[1][0] =  v ? a : seg0[1][0] + dx
-					seg[0][1] = !v ? a : seg0[0][1] + dy
-					seg[1][1] = !v ? a : seg0[1][1] + dy
+					// snap both end-points on main-axis.
+					let m1 = seg_m1(seg0) + dm
+					let m2 = seg_m2(seg0) + dm
+					let m1s = snap_to_line(m1, m_snap_lines)
+					let m2s = snap_to_line(m2, m_snap_lines)
+					if (m1s != null && m2s != null) // both ends snapped
+						if (abs(m1s - m1) <= abs(m2s - m2)) // pick the one closer to snap line
+							m2s = null
+						else
+							m1s = null
+					if (m1s != null)
+						m2s = m1s + (seg_m2(seg0) - seg_m1(seg0))
+					else if (m2s != null)
+						m1s = m2s - (seg_m2(seg0) - seg_m1(seg0))
+
+					seg[0][0] =  v ? a : m1s ?? m1
+					seg[1][0] =  v ? a : m2s ?? m2
+					seg[0][1] = !v ? a : m1s ?? m1
+					seg[1][1] = !v ? a : m2s ?? m2
 
 				} else { // move on cross axis
 
-					let a = seg_axis(seg0) + (is_v(seg) ? dx : dy)
-					let snap_range = closest_move_range(a, ranges)
-					let [min_a, max_a] = snap_range
-					a = clamp(a, min_a, max_a)
-					let sa = !ui.key('shift') ? snap_to_line(a, snap_lines) : null
-					if (sa != null)
-						a = sa
+					let a = seg_axis(seg0) + (v ? dx : dy)
+					let sa = snap_to_ranges(a, ranges, snap_lines) ?? a
+					a = sa ?? a
 					set_seg_axis(seg, a)
 					create_edges()
 					s.snap_line = sa
@@ -1175,11 +1259,26 @@ function house_plan(t) {
 			log_pop('START RESIZE SEG: {0}', seg.i)
 			pr_log()
 
+			let ranges = seg_resize_ranges(seg, p)
+			let snap_lines = seg_resize_snap_lines(seg, true)
+
 			let s = {}
 
 			s.resize = function(dx, dy) {
 				let x1 = p0[0] + dx * abs(sdx)
 				let y1 = p0[1] + dy * abs(sdy)
+
+				let a = sdx ? x1 : y1
+				let sa = snap_to_ranges(a, ranges, snap_lines)
+				if (sa != null)
+					a = sa
+				if (sdx)
+					x1 = a
+				else
+					y1 = a
+				create_edges()
+				s.snap_line = sa
+
 				p[0] = x1
 				p[1] = y1
 				create_edges()
@@ -1533,7 +1632,7 @@ ui.box_widget('plan_view', {
 		if (DEBUG_PLAN)
 		for (let c of state.comps) {
 
-			let [x,y] = poly_center(c)
+			let [x,y] = poly_center(c.ps)
 			cx.fillStyle = c.outer ? '#39f' : '#99f'
 			cx.fillText(c.i + (c.area ? ' ('+format_kcount(c.area / 1e4)+'m²)' : ''), x, y+5)
 
