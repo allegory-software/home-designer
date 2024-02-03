@@ -151,7 +151,7 @@ function offset_corner(p0, p1, p2, d, out) {
 	let [x1, y1, x2, y2] = line_offset( d, p0[0], p0[1], p1[0], p1[1], out)
 	let [x3, y3, x4, y4] = line_offset(-d, p2[0], p2[1], p1[0], p1[1], out)
 	let t1 = line_line_intersection(x1, y1, x2, y2, x3, y3, x4, y4)
-	if (abs(t1) == inf) { // parallel: make a line cap of 2 points
+	if (abs(t1) == inf) { // parallel: make a line cap of 2 points, 1*d thick
 		let dx = x2 == x4 ? d * sign(x1 - x2) : 0
 		let dy = y2 == y4 ? d * sign(y1 - y2) : 0
 		out[0] = x2 + dx
@@ -895,6 +895,8 @@ function house_plan(t) {
 			level_plan.bb = plan_bb()
 		}
 
+		level_plan.snap_lines = []
+
 		function fix_level() {
 			split_intersecting_segs()
 			break_overlapping_segs()
@@ -907,6 +909,8 @@ function house_plan(t) {
 			extract_cycles()
 			find_inside_comps()
 			create_edges()
+			level_plan.snap_lines[0] = snap_lines_for(1)
+			level_plan.snap_lines[1] = snap_lines_for(0)
 		}
 
 		// plan view UI ops ----------------------------------------------------
@@ -999,6 +1003,43 @@ function house_plan(t) {
 			return !(am2 <= bm1 || bm2 <= am1)
 		}
 
+		function snap_lines_for(v, exclude_seg) {
+			let mi = v ? 0 : 1
+			let ms = []
+			for (let p of ps) {
+				if (exclude_seg && (exclude_seg[0] == p || exclude_seg[1] == p))
+					continue
+				let m = p[mi]
+				ms.push(m)
+			}
+			ms.sort()
+			uniq_sorted(ms)
+
+			ms.snap = function(m, snap_d) {
+				let min_d = 1/0
+				let min_m
+				for (let m1 of ms) {
+					let d = abs(m - m1)
+					if (d <= snap_d && d < min_d) {
+						min_d = d
+						min_m = m1
+					}
+				}
+				return min_m
+			}
+
+			ms.v = v
+
+			return ms
+		}
+
+		function snap_point(x, y, snap_d) {
+			let sx = level_plan.snap_lines[0].snap(x, snap_d)
+			let sy = level_plan.snap_lines[1].snap(y, snap_d)
+			return [sx, sy]
+		}
+		level_plan.snap_point = snap_point
+
 		function seg_move_bump_limit(seg, sign) {
 			let v = is_v(seg)
 			let a = seg_axis(seg)
@@ -1023,14 +1064,11 @@ function house_plan(t) {
 			}
 			return min_a1
 		}
-		let BUMP_MARGIN = 35
 		function seg_move_ranges(seg) {
 			let min_a = seg_move_bump_limit(seg, -1)
 			let max_a = seg_move_bump_limit(seg,  1)
 			let ranges = [
-				[min_a + BUMP_MARGIN, max_a - BUMP_MARGIN, 0],
-				[min_a, min_a, BUMP_MARGIN],
-				[max_a, max_a, BUMP_MARGIN],
+				[min_a, max_a],
 			]
 			return ranges
 		}
@@ -1052,74 +1090,24 @@ function house_plan(t) {
 			}
 			return min_a1
 		}
-		function seg_move_m1_ranges(seg) {
-			normalize_seg(seg)
-			let min_a = seg_resize_bump_limit(seg, seg_p1(seg), -1)
-			let max_a = seg_resize_bump_limit(seg, seg_p2(seg),  1) - seg_m1(seg)
-			let ranges = [
-				[min_a + BUMP_MARGIN, max_a - BUMP_MARGIN, 0],
-				[min_a, min_a, BUMP_MARGIN],
-				[max_a, max_a, BUMP_MARGIN],
-			]
-			return ranges
-		}
 		function seg_resize_ranges(seg, p) {
 			let min_a = seg_resize_bump_limit(seg, p, -1)
 			let max_a = seg_resize_bump_limit(seg, p,  1)
 			let ranges = [
-				[min_a + BUMP_MARGIN, max_a - BUMP_MARGIN, 0],
-				[min_a, min_a, BUMP_MARGIN],
-				[max_a, max_a, BUMP_MARGIN],
+				[min_a, max_a],
 			]
 			return ranges
-		}
-		function seg_move_snap_lines(seg, include_seg) {
-			let v = is_v(seg)
-			let as = []
-			for (let seg1 of segs) {
-				if (!include_seg && seg1 == seg)
-					continue
-				if (is_v(seg1) == v) {
-					// snap to parallel segs
-					let a = seg_axis(seg1)
-					as.push(a)
-				}
-			}
-			// snap to end-points
-			for (let p of ps) {
-				if (p.segs.length == 1) {
-					if (!include_seg && p.segs[0] == seg)
-						continue
-					as.push(p[v ? 0 : 1])
-				}
-			}
-			as.sort()
-			uniq_sorted(as)
-			return as
-		}
-		function seg_resize_snap_lines(seg, include_seg) {
-			let mi = is_v(seg) ? 1 : 0
-			let ms = []
-			for (let p of ps) {
-				if (!include_seg && (seg[0] == p || seg[1] == p))
-					continue
-				let m = p[mi]
-				ms.push(m)
-			}
-			ms.sort()
-			uniq_sorted(ms)
-			return ms
 		}
 		function closest_range(a, ranges) {
 			let min_range
 			let min_d = 1/0
 			for (let range of ranges) {
-				let [a1, a2, margin] = range
+				let [a1, a2] = range
 				if (a >= a1 && a <= a2) { // in range
 					min_range = range
 					break
 				}
-				let d = max(0, min(abs(a1 - a), abs(a2 - a)) - margin) // distance to range's closest end-point
+				let d = max(0, min(abs(a1 - a), abs(a2 - a))) // distance to range's closest end-point
 				if (d < min_d) {
 					min_range = range
 					min_d = d
@@ -1127,16 +1115,15 @@ function house_plan(t) {
 			}
 			return min_range
 		}
-		function snap_to_line(a, as) {
-			for (let a1 of as)
-				if (abs(a - a1) <= 20)
-					return a1
-		}
-		function snap_to_ranges(a, ranges, snap_lines) {
+		function snap_seg(a, ranges, snap_lines, draw_state) {
 			let snap_range = closest_range(a, ranges)
 			let [min_a, max_a] = snap_range
 			a = clamp(a, min_a, max_a)
-			return !ui.key('shift') ? snap_to_line(a, snap_lines) : null
+			let sa = snap_lines.snap(a, ui.key('shift') ? 2 : 20)
+			draw_state.snap_lines.length = 0
+			if (sa != null)
+				draw_state.snap_lines.push(sa, snap_lines.v)
+			return sa
 		}
 
 		// find the seg in the left, right, top, bottom side around p.
@@ -1161,13 +1148,13 @@ function house_plan(t) {
 			let move_freely = seg[0].segs.length == 1 && seg[1].segs.length == 1
 			let seg0 = [[...seg[0]], [...seg[1]]]
 			let ranges = seg_move_ranges(seg)
-			let snap_lines = seg_move_snap_lines(seg, !move_freely)
+			let snap_lines = snap_lines_for(is_v(seg), move_freely && seg)
 			let v = is_v(seg0)
-			let m_snap_lines = move_freely && seg_resize_snap_lines(seg, false)
+			let m_snap_lines = move_freely && snap_lines_for(!is_v(seg), seg)
 
 			let s = {}
 
-			s.move = function(dx, dy) {
+			s.move = function(dx, dy, draw_state) {
 
 				let dm = v ? dy : dx
 				let da = v ? dx : dy
@@ -1175,14 +1162,14 @@ function house_plan(t) {
 				if (move_freely) {
 
 					let a = seg_axis(seg0) + da
-					let sa = snap_to_line(a, snap_lines) ?? a
+					let sa = snap_lines.snap(a) ?? a
 					a = sa ?? a
 
 					// snap both end-points on main-axis.
 					let m1 = seg_m1(seg0) + dm
 					let m2 = seg_m2(seg0) + dm
-					let m1s = snap_to_line(m1, m_snap_lines)
-					let m2s = snap_to_line(m2, m_snap_lines)
+					let m1s = m_snap_lines.snap(m1)
+					let m2s = m_snap_lines.snap(m2)
 					if (m1s != null && m2s != null) // both ends snapped
 						if (abs(m1s - m1) <= abs(m2s - m2)) // pick the one closer to snap line
 							m2s = null
@@ -1205,30 +1192,27 @@ function house_plan(t) {
 				} else { // move on cross axis
 
 					let a = seg_axis(seg0) + (v ? dx : dy)
-					let sa = snap_to_ranges(a, ranges, snap_lines)
+					let sa = snap_seg(a, ranges, snap_lines, draw_state)
 					a = sa ?? a
 					set_seg_axis(seg, a)
 					create_edges()
-
-					s.snap_line = sa
-					s.snap_line_is_v = v
-
 				}
 
 			}
 
-			s.stop = function() {
+			s.stop = function(draw_state) {
 				log_push()
 				fix_level()
 				log_pop('STOP MOVE SEG: {0}', seg.i)
 				pr_log()
+				draw_state.snap_lines.length = 0
 			}
 
 			return s
 		}
 		level_plan.start_move_seg = start_move_seg
 
-		function start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy) {
+		function start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state) {
 
 			// based on direction of drag, either detach a seg or add a seg, and start resizing it.
 			log_push()
@@ -1248,8 +1232,13 @@ function house_plan(t) {
 			}
 
 			if (!seg) { // create new seg, anchored to p or to mouse pos when clicked
-				let x = p ? p[0] : mx0
-				let y = p ? p[1] : my0
+				let x, y
+				if (p) {
+					[x, y] = p
+				} else {
+					x = mx0
+					y = my0
+				}
 				let p1 = add_point(x, y)
 				let p2 = add_point(
 					x + dx * abs(sdx),
@@ -1267,16 +1256,16 @@ function house_plan(t) {
 			pr_log()
 
 			let ranges = seg_resize_ranges(seg, p)
-			let snap_lines = seg_resize_snap_lines(seg, true)
+			let snap_lines = snap_lines_for(!is_v(seg), seg)
 
 			let s = {seg: seg}
 
-			s.resize = function(dx, dy) {
+			s.resize = function(dx, dy, draw_state) {
 				let x1 = p0[0] + dx * abs(sdx)
 				let y1 = p0[1] + dy * abs(sdy)
 
 				let a = sdx ? x1 : y1
-				let sa = snap_to_ranges(a, ranges, snap_lines)
+				let sa = snap_seg(a, ranges, snap_lines, draw_state)
 				if (sa != null)
 					a = sa
 				if (sdx)
@@ -1286,16 +1275,14 @@ function house_plan(t) {
 				p[0] = x1
 				p[1] = y1
 				create_edges()
-
-				s.snap_line = sa
-				s.snap_line_is_v = !is_v(seg)
 			}
 
-			s.stop = function() {
+			s.stop = function(draw_state) {
 				log_push()
 				fix_level()
 				log_pop('STOP RESIZE SEG: {0}', seg.i)
 				pr_log()
+				draw_state.snap_lines.length = 0
 			}
 
 			return s
@@ -1402,20 +1389,20 @@ let scale_group = memoize(function(name) {
 
 // plan view -----------------------------------------------------------------
 
-let PLAN_VIEW_ID    = ui.S-1
-let PLAN_VIEW_STATE = ui.S+0
+let PLAN_VIEW_ID         = ui.S-1
+let PLAN_VIEW_DRAW_STATE = ui.S+0
 
 ui.box_widget('plan_view', {
 
 	create: function(cmd, id, plan, fr, align, valign, min_w, min_h) {
 
 		let s = ui.state(id)
-		let state = s.get('state')
-		if (!state) {
-			state = {}
-			s.set('state', state)
+		let draw_state = s.get('draw_state')
+		if (!draw_state) {
+			draw_state = {snap_lines: []}
+			s.set('draw_state', draw_state)
 		}
-		state.plan = plan
+		s.set('plan', plan)
 
 		let [dstate, dx, dy] = ui.drag(id)
 
@@ -1426,29 +1413,22 @@ ui.box_widget('plan_view', {
 
 		if (dstate == 'drag' || dstate == 'dragging' || dstate == 'drop') {
 
+			let hs = ui.hover(id)
+			let cs = ui.captured(id)
+
 			if (dstate == 'drag') {
 
-				let hs = ui.hover(id)
-				if (hs) {
+				let seg = hs.get('seg')
+				let p   = hs.get('p')
 
-					let seg = hs.get('seg')
-					let p   = hs.get('p')
+				if (seg) { // move seg
 
-					if (seg) { // move seg
+					cs.set('action', 'move_seg')
+					cs.set('move_seg', plan.start_move_seg(seg))
 
-						let cs = ui.captured(id)
-						cs.set('action', 'move_seg')
-						cs.set('move_seg', plan.start_move_seg(seg))
-
-					} else if (p) { // clicked on point, action not clear yet
-
-						let cs = ui.captured(id)
-
-					}
 				}
 			}
 
-			let cs = ui.captured(id)
 			let action = cs.get('action')
 
 			if (!action && (abs(dx) >= 10 || abs(dy) >= 10)) { // dragged far enough to assume intent to drag.
@@ -1459,72 +1439,56 @@ ui.box_widget('plan_view', {
 				if (sdx || sdy) {
 					action = 'resize_seg'
 					cs.set('action', action)
-					let mx0 = cs.get('mx0')
-					let my0 = cs.get('my0')
-					let rstate = plan.start_resize_seg(cs.get('p'), mx0, my0, dx, dy, sdx, sdy)
-					cs.set('resize_seg', rstate)
+					let p = cs.get('p')
+					let mx0 = cs.get('x')
+					let my0 = cs.get('y')
+					let s = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state)
+					cs.set('resize_seg', s)
 				}
 
 			}
 
-			if (action == 'move_seg') {
-				let mstate = cs.get('move_seg')
-				mstate.move(dx, dy)
-				state.snap_line      = mstate.snap_line
-				state.snap_line_is_v = mstate.snap_line_is_v
-			}
+			if (action == 'move_seg')
+				cs.get('move_seg').move(dx, dy, draw_state)
 
-			if (action == 'resize_seg') {
-				let rstate = cs.get('resize_seg')
-				rstate.resize(dx, dy)
-				state.snap_line      = rstate.snap_line
-				state.snap_line_is_v = rstate.snap_line_is_v
-			}
+			if (action == 'resize_seg')
+				cs.get('resize_seg').resize(dx, dy, draw_state)
 
 			if (dstate == 'drop') {
 				if (action == 'move_seg') {
-					cs.get('move_seg').stop()
+					cs.get('move_seg').stop(draw_state)
 				} else if (action == 'resize_seg') {
-					cs.get('resize_seg').stop()
+					cs.get('resize_seg').stop(draw_state)
 				}
-				state.snap_line      = null
-				state.snap_line_is_v = null
 			}
 
 		}
 
 		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
-				id, state,
+				id, draw_state,
 			)
 	},
 
 	after_position: function(a, i, axis)	{
-		let x00   = a[i+0]
-		let y00   = a[i+1]
-		let w     = a[i+2]
-		let h     = a[i+3]
-		let id    = a[i+PLAN_VIEW_ID]
-		let state = a[i+PLAN_VIEW_STATE]
+		let x00 = a[i+0]
+		let y00 = a[i+1]
+		let w   = a[i+2]
+		let h   = a[i+3]
+		let id  = a[i+PLAN_VIEW_ID]
+		let draw_state = a[i+PLAN_VIEW_DRAW_STATE]
 		let sg = scale_group('editor')
 		if (!axis) {
 			sg.reset_scale()
 		} else {
-			let [x0, y0] = sg.scale_to_fit(state.plan.bb, w, h)
-			state.x0 = x0
-			state.y0 = y0
+			let plan = ui.state(id).get('plan')
+			let [x0, y0] = sg.scale_to_fit(plan.bb, w, h)
+			draw_state.x0 = x0
+			draw_state.y0 = y0
 			// pick what parts of the plan to send over the network for drawing
 			// and in which format (the plan has arrays with props which is not valid json).
-			let plan = state.plan
-			state.plan = 0 // don't send this
-			state.comps = plan.comps
-			state.segs = plan.segs // TODO: remove this from draw stream
-			if (DEBUG_PLAN)
-				state.ps = plan.ps
-			let cs = ui.captured(id)
-			if (cs) {
-				cs.set('mx0', sg.plan_x(ui.mx0 - x00 - x0))
-				cs.set('my0', sg.plan_y(ui.my0 - y00 - y0))
-			}
+			draw_state.comps = plan.comps
+			draw_state.segs = plan.segs // TODO: remove this from draw stream
+			draw_state.ps = plan.ps // TODO: remove this from draw stream
 		}
 	},
 
@@ -1535,7 +1499,7 @@ ui.box_widget('plan_view', {
 		let w     = a[i+2]
 		let h     = a[i+3]
 		let id    = a[i+PLAN_VIEW_ID]
-		let state = a[i+PLAN_VIEW_STATE]
+		let draw_state = a[i+PLAN_VIEW_DRAW_STATE]
 
 		let hs = ui.hovers(id)
 		let cs = ui.captured(id)
@@ -1545,7 +1509,7 @@ ui.box_widget('plan_view', {
 		let cx = ui.cx
 		cx.save()
 		cx.translate(x00, y00)
-		cx.translate(state.x0, state.y0)
+		cx.translate(draw_state.x0, draw_state.y0)
 		cx.translate(.5, .5)
 
 		// allowed moving areas
@@ -1581,10 +1545,11 @@ ui.box_widget('plan_view', {
 		}
 
 		// snap line
-		let sa = state.snap_line
-		if (sa) {
+		for (let i = 0, sl = draw_state.snap_lines, n = sl.length; i < n; i += 2) {
+			let sa   = sl[i]
+			let is_v = sl[i+1]
 			let x1, y1, x2, y2
-			if (state.snap_line_is_v) {
+			if (is_v) {
 				x1 = sg.x(sa)
 				x2 = sg.x(sa)
 				y1 = 0
@@ -1604,9 +1569,8 @@ ui.box_widget('plan_view', {
 			cx.setLineDash([])
 		}
 
-
 		// walls
-		for (let comp of state.comps) {
+		for (let comp of draw_state.comps) {
 
 			cx.beginPath()
 
@@ -1647,7 +1611,7 @@ ui.box_widget('plan_view', {
 		}
 
 		if (DEBUG_PLAN)
-		for (let c of state.comps) {
+		for (let c of draw_state.comps) {
 
 			let [x,y] = poly_center(c.ps)
 			cx.fillStyle = c.outer ? '#39f' : '#99f'
@@ -1695,12 +1659,12 @@ ui.box_widget('plan_view', {
 		}
 		else if (hs?.get('p'))
 			ui.set_cursor(hs.get('p_seg') ? 'alias' : 'copy')
-		//else
-		//	ui.set_cursor('copy')
+		else
+			ui.set_cursor('copy')
 
 		// segments
 		if (DEBUG_PLAN)
-		for (let seg of state.segs) {
+		for (let seg of draw_state.segs) {
 			let p1 = seg[0]
 			let p2 = seg[1]
 			cx.beginPath()
@@ -1722,7 +1686,7 @@ ui.box_widget('plan_view', {
 
 		// point numbers
 		if (DEBUG_PLAN)
-		for (let p of state.ps) {
+		for (let p of draw_state.ps) {
 			let [x0, y0] = p
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
@@ -1735,57 +1699,52 @@ ui.box_widget('plan_view', {
 
 	hit: function(a, i) {
 
-		let x00   = a[i+0]
-		let y00   = a[i+1]
-		let w     = a[i+2]
-		let h     = a[i+3]
-		let id    = a[i+PLAN_VIEW_ID]
-		let state = a[i+PLAN_VIEW_STATE]
+		let x00 = a[i+0]
+		let y00 = a[i+1]
+		let w   = a[i+2]
+		let h   = a[i+3]
+		let id  = a[i+PLAN_VIEW_ID]
+		let draw_state = a[i+PLAN_VIEW_DRAW_STATE]
 
 		if (ui.captured(id))
 			return
 
-		let sg = scale_group('editor')
+		if (!ui.hit_box(a, i))
+			return
 
-		let hs = ui.hit_box(a, i) && ui.hover(id)
+		let hs = ui.hover(id)
+
+		let sg = scale_group('editor')
 
 		let cx = ui.cx
 
+		let sl = draw_state.snap_lines
+		sl.length = 0
+
+		let snap_d = ui.key('shift') ? 1 : 10
+
 		cx.save()
 		cx.translate(x00, y00)
-		cx.translate(state.x0, state.y0)
+		cx.translate(draw_state.x0, draw_state.y0)
 		ui.update_mouse()
 
 		if (hs) {
 
-			let hit_comp
-			for (let c of state.comps) {
-				let [x1, y1, x2, y2] = c.bb
-				x1 = sg.x(x1)
-				x2 = sg.x(x2)
-				y1 = sg.y(y1)
-				y2 = sg.y(y2)
-				if (ui.hit_bb(x1, y1, x2, y2)) {
-					hit_comp = c
-					hs.set('comp', c)
+			let hit_p
+			for (let p of draw_state.ps) {
+				let dx = ui.mx - sg.x(p[0])
+				let dy = ui.my - sg.y(p[1])
+				if (abs(dx) <= snap_d && abs(dy) <= snap_d) {
+					hit_p = p
+					hs.set('p', p) // point to start new seg from
+					sl.push(p[0], 1, p[1], 0)
 					break
 				}
 			}
 
-			let hit_p
-			if (hit_comp)
-				for (let p of hit_comp.ps) {
-					let dx = ui.mx - sg.x(p[0])
-					let dy = ui.my - sg.y(p[1])
-					if (abs(dx) <= 10 && abs(dy) <= 10) {
-						hit_p = p
-						hs.set('p', p) // point to start new seg from
-						break
-					}
-				}
-
+			let hit_seg
 			if (!hit_p)
-				for (let seg of state.segs) {
+				for (let seg of draw_state.segs) {
 					let p1 = seg[0]
 					let p2 = seg[1]
 					let x1 = sg.x(min(p1[0], p2[0]))
@@ -1802,10 +1761,21 @@ ui.box_widget('plan_view', {
 						continue
 					}
 					if (ui.hit_rect(x1, y1, x2-x1, y2-y1)) {
+						hit_seg = seg
 						hs.set('seg', seg)
 						break
 					}
 				}
+
+			if (!hit_p && !hit_seg) {
+				let x = sg.plan_x(ui.mx)
+				let y = sg.plan_y(ui.my)
+				let [sx, sy] = ui.state(id).get('plan').snap_point(x, y, snap_d)
+				hs.set('x', sx ?? x)
+				hs.set('y', sy ?? y)
+				if (sx != null) sl.push(sx, 1)
+				if (sy != null) sl.push(sy, 0)
+			}
 
 		}
 
