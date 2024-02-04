@@ -1146,7 +1146,7 @@ function house_plan(t) {
 			let snap_range = closest_range(a, ranges)
 			let [min_a, max_a] = snap_range
 			a = clamp(a, min_a, max_a)
-			let sa = snap_lines.snap(a, ui.key('shift') ? 2 : 20)
+			let sa = snap_lines.snap(a, ui.key('shift') ? 2 : 24)
 			draw_state.snap_lines.length = 0
 			if (sa != null)
 				draw_state.snap_lines.push(sa, snap_lines.v)
@@ -1449,14 +1449,12 @@ ui.box_widget('plan_view', {
 
 			if (dstate == 'drag') {
 
-				let seg = hs.get('seg')
-				let p   = hs.get('p')
+				let action = hs.get('action')
+				let seg    = hs.get('seg')
+				let p      = hs.get('p')
 
-				if (seg) { // move seg
-
-					cs.set('action', 'move_seg')
+				if (action == 'move_seg') { // move seg
 					cs.set('move_seg', plan.start_move_seg(seg))
-
 				}
 			}
 
@@ -1470,7 +1468,7 @@ ui.box_widget('plan_view', {
 				if (sdx || sdy) {
 					action = 'resize_seg'
 					cs.set('action', action)
-					let p = cs.get('p')
+					let p   = cs.get('p')
 					let mx0 = cs.get('x')
 					let my0 = cs.get('y')
 					let s = plan.start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state)
@@ -1633,6 +1631,22 @@ ui.box_widget('plan_view', {
 			}
 		}
 
+		// hit seg
+		let hit_seg = hs?.get('seg')
+		let action  = hs?.get('action')
+		if (hit_seg && !action) {
+			let x = sg.x(hs.get('x'))
+			let y = sg.y(hs.get('y'))
+			cx.beginPath()
+			cx.arc(x, y, 3, 0, 2*PI)
+			cx.strokeStyle = 'black'
+			cx.lineWidth = 3
+			cx.stroke()
+			cx.lineWidth = 1
+			cx.fillStyle = 'white'
+			cx.fill()
+		}
+
 		// hit point
 		let hit_p = hs?.get('p')
 		if (hit_p) {
@@ -1650,8 +1664,9 @@ ui.box_widget('plan_view', {
 
 		// cursor
 
+		{
 		let action = cs?.get('action')
-		let hit_seg = action == 'move_seg' && cs.get('seg') || hs?.get('seg')
+		let hit_seg = action == 'move_seg' && cs.get('seg') || (hs?.get('action') == 'move_seg' && hs?.get('seg'))
 		if (hit_seg) {
 			if (hit_seg[0].segs.length == 1 && hit_seg[1].segs.length == 1)
 				ui.set_cursor('move')
@@ -1662,6 +1677,7 @@ ui.box_widget('plan_view', {
 			ui.set_cursor(hs.get('p_seg') ? 'alias' : 'copy')
 		else
 			ui.set_cursor('copy')
+		}
 
 		// DEBUG ---------------------------------------------------------------
 
@@ -1685,43 +1701,6 @@ ui.box_widget('plan_view', {
 			let y = sg.y(y0) + 5
 			cx.fillStyle = '#f66'
 			cx.fillText(seg.i, x, y)
-		}
-
-		// hit-testing seg offsets
-		if (DEBUG_PLAN)
-		for (let seg of draw_state.segs) {
-			let p1 = seg[0]
-			let p2 = seg[1]
-			let x1 = sg.x(p1[0])
-			let y1 = sg.y(p1[1])
-			let x2 = sg.x(p2[0])
-			let y2 = sg.y(p2[1])
-			cx.beginPath()
-			cx.moveTo(x1, y1)
-			cx.lineTo(x2, y2)
-			cx.strokeStyle = 'red'
-			cx.stroke()
-			for (let i = 0; i <= 1; i++) {
-				let S = i == 0 ? -1 : 1
-				let ox1 = x1
-				let oy1 = y1
-				let ox2 = x2
-				let oy2 = y2
-				if (is_v(seg)) {
-					let j = y1 < y2 ? (i == 0 ? -1 : -2) : (i == 0 ? -2 : -1)
-					ox1 += sg.d(S*seg[j])
-					ox2 += sg.d(S*seg[j])
-				} else {
-					let j = x1 > x2 ? (i == 0 ? -1 : -2) : (i == 0 ? -2 : -1)
-					oy1 += sg.d(S*seg[j])
-					oy2 += sg.d(S*seg[j])
-				}
-				cx.beginPath()
-				cx.moveTo(ox1, oy1)
-				cx.lineTo(ox2, oy2)
-				cx.strokeStyle = i == 0 ? 'blue' : 'green'
-				cx.stroke()
-			}
 		}
 
 		// point numbers
@@ -1802,34 +1781,60 @@ ui.box_widget('plan_view', {
 			let hit_seg
 			if (!hit_p)
 				for (let seg of draw_state.segs) {
+
 					let x1 = seg[0][0]
 					let y1 = seg[0][1]
 					let x2 = seg[1][0]
 					let y2 = seg[1][1]
-					if (is_v(seg)) {
+					let v = is_v(seg)
+
+					let sx1, sy1, sx2, sy2 // screen hit box
+
+					// test over the seg's area between its offset edges.
+					let m = 0 //sg.line_width >> 1
+					if (v) {
 						let x = x1
-						x1 = x + seg[y1 < y2 ? -2 : -1] - 7
-						x2 = x - seg[y1 < y2 ? -1 : -2] + 7
-						y1 = seg_y1(seg)
-						y2 = seg_y2(seg)
+						sx1 = sg.x(x + seg[y1 < y2 ? -2 : -1]) + m
+						sx2 = sg.x(x - seg[y1 < y2 ? -1 : -2]) - m
+						sy1 = sg.y(seg_y1(seg))
+						sy2 = sg.y(seg_y2(seg))
 					} else if (y1 == y2) {
 						let y = y1
-						y1 = y + seg[x1 > x2 ? -2 : -1] - 7
-						y2 = y - seg[x1 > x2 ? -1 : -2] + 7
-						x1 = seg_x1(seg)
-						x2 = seg_x2(seg)
+						sy1 = sg.y(y + seg[x1 > x2 ? -2 : -1]) + m
+						sy2 = sg.y(y - seg[x1 > x2 ? -1 : -2]) - m
+						sx1 = sg.x(seg_x1(seg))
+						sx2 = sg.x(seg_x2(seg))
 					} else {
 						continue
 					}
-					x1 = sg.x(x1)
-					y1 = sg.y(y1)
-					x2 = sg.x(x2)
-					y2 = sg.y(y2)
-					if (ui.hit_bb(x1, y1, x2, y2)) {
+					if (ui.hit_bb(sx1, sy1, sx2, sy2)) {
 						hit_seg = seg
 						hs.set('seg', seg)
+						hs.set('action', 'move_seg')
 						break
 					}
+
+					// try a wider area and compute the point of the mouse projected on the seg.
+					m = 20
+					if (v) {
+						sx1 -= m
+						sx2 += m
+					} else {
+						sy1 -= m
+						sy2 += m
+					}
+					if (ui.hit_bb(sx1, sy1, sx2, sy2)) {
+						hit_seg = seg
+						hs.set('seg', seg)
+						let sx = !v ? sg.plan_x(ui.mx) : null
+						let sy = v  ? sg.plan_y(ui.my) : null
+						hs.set('x', sx ?? x1)
+						hs.set('y', sy ?? y1)
+						if (sx != null) sl.push(sx, 1)
+						if (sy != null) sl.push(sy, 0)
+						break
+					}
+
 				}
 
 			if (!hit_p && !hit_seg) {
