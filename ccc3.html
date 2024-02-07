@@ -262,13 +262,14 @@ function offset_poly(ps, d) {
 	}
 
 	if (ps.length == 1) { // single null seg: make a square
-		let i = 0
+		let ci = 0
 		for (let op of [[-d, -d], [d, -d], [d, d], [-d, d]]) {
 			op.p = ps[0]
-			op.ci = i++
+			op.ci = ci++
 			ops.push(op)
 		}
 	} else {
+		let ci = 0
 		for (let i = 0, n = ps.length; i < n; i++) {
 			let p1 = ps[i]
 			let i0 = i-1
@@ -279,12 +280,12 @@ function offset_poly(ps, d) {
 			let [x0, y0] = p1
 			let op1 = [x1 - x0, y1 - y0]
 			op1.p = p1
-			op1.ci = i
+			op1.ci = ci++
 			ops.push(op1)
 			if (x2 != null) {
 				let op2 = [x2 - x0, y2 - y0]
 				op2.p = p1
-				op2.ci = i
+				op2.ci = ci++
 				ops.push(op2)
 			}
 		}
@@ -399,7 +400,6 @@ function closed_walk(first, outer_cycle) {
 	do {
 		walk.push(curr)
 		let next = next_adj(prev, curr, !prev || outer_cycle)
-		pr(outer_cycle, 'curr', curr.i, 'next', next.i)
 		prev = curr
 		curr = next
 		if (curr == first) {
@@ -657,17 +657,17 @@ function house_plan(t) {
 			rem_segs(seg => seg_dir(seg) == '/', 'angled segs')
 		}
 
-		// NOTE: assumes segs are sorted, null segs removed, points deduplicated
+		// NOTE: assumes segs are sorted, null segs removed, points deduplicated.
 		function merge_colinear_segs() {
 			for (let p of ps) {
 				if (p.segs.length == 2) {
 					let s1 = p.segs[0]
 					let s2 = p.segs[1]
 					if (is_v(s1) && is_v(s2) || is_h(s1) && is_h(s2)) { // colinear
-						let p1i = 1-seg_pi(s2, p)
-						let p2  = s2[p1i]
+						let s1_pi = seg_pi(s1, p)
+						let s2_p2 = s2[1-seg_pi(s2, p)]
 						push_log()
-						set_seg_point(s1, p1i, p2)
+						set_seg_point(s1, s1_pi, s2_p2)
 						rem_seg(s2)
 						pop_log('segs merged: {0} + {1} => {0}', s1.i, s2.i, s1.i)
 					}
@@ -1403,6 +1403,7 @@ function house_plan(t) {
 				pop_log('STOP RESIZE SEG: {0}', seg.i)
 				pr_log()
 				draw_state.snap_lines.length = 0
+				draw_state.measure_edges.length = 0
 			}
 
 			return s
@@ -1768,6 +1769,9 @@ ui.box_widget('plan_view', {
 					ui.animate()
 				}
 
+				if (ui.button('debug_plan_button', 'DEBUG'))
+					DEBUG_PLAN = !DEBUG_PLAN
+
 			ui.end_h()
 
 		ui.end_stack()
@@ -2007,6 +2011,7 @@ ui.box_widget('plan_view', {
 				let y1 = ep_y(ep1)
 				let x2 = ep_x(ep2)
 				let y2 = ep_y(ep2)
+				pr(ep1.ci, ep2.ci, x1, y1, x2, y2)
 				;[x1, y1, x2, y2] = line_offset(-10, x1, y1, x2, y2, [])
 				draw_length(cx, sg, x1, y1, x2, y2)
 			}
@@ -2101,8 +2106,8 @@ ui.box_widget('plan_view', {
 			cx.fillText(p.i, x, y)
 		}
 
-		// cycle numbers
-		if (DEBUG_PLAN)
+		// edge point numbers
+		if (0 && DEBUG_PLAN)
 		for (let c of draw_state.comps) {
 			let co = c // no var shadowing because langauge designers are dumb
 			for (let c of co.cycles) {
@@ -2546,7 +2551,7 @@ ui.main = function() {
 
 }
 
-DEBUG_PLAN = 0
+DEBUG_PLAN = 1
 
 }()) // module function
 
