@@ -399,9 +399,22 @@ function closed_walk(first, outer_cycle) {
 	do {
 		walk.push(curr)
 		let next = next_adj(prev, curr, !prev || outer_cycle)
+		pr(outer_cycle, 'curr', curr.i, 'next', next.i)
 		prev = curr
 		curr = next
-	} while (curr != first) // TODO: fix |_ bug
+		if (curr == first) {
+			if (outer_cycle) {
+				// when tracing the outer cycle is not enough to stop when the
+				// starting point is encountered since multiple outer cycles can
+				// meet at the starting point (connected with filaments or not).
+				let next = next_adj(prev, curr, true)
+				if (next == walk[1])
+					break
+			} else {
+				break // filament check done later on inner cycles
+			}
+		}
+	} while (1)
 	return walk
 }
 
@@ -1529,6 +1542,8 @@ let scale_group = memoize(name => scaler())
 // plan view -----------------------------------------------------------------
 
 function draw_grid(cx, sg, x0, y0, w, h, step, dark_color, light_color) {
+	if (!sg.show_grid)
+		return
 	if (sg.d(step) < 7)
 		return
 	let color = ui.dark() ? dark_color : light_color
@@ -1725,34 +1740,33 @@ ui.box_widget('plan_view', {
 					id, draw_state,
 				)
 
-			ui.h(0, 0, 's', 't')
+			ui.m(ui.sp())
+			ui.h(0, ui.sp05(), 's', 't')
 
 				if (!ui.window_focused) {
+					ui.p(ui.sp05(), 0)
 					ui.stack('', 0)
-						//ui.m(ui.sp())
-						//ui.p(ui.sp075())
 						ui.font('far')
 						ui.fs(ui.xlarge())
-						ui.bb('', 'bg3')
-						ui.text('', '\uf11c', 0, 'c', 'c') // , 100, 100)
-						//ui.polyline('', '0 0  50 0   50 30   0 30', 1, null, null, 'text', null, 2)
+						ui.color('text')
+						ui.text('', '\uf11c', 0, 'c', 'c')
+						ui.polyline('', '0 5  35 20', 1, null, null, 'text', null, 2)
 					ui.end_stack()
 				}
-				ui.text('', 'Bla jl', 0, '[')
 
 				ui.v(1); ui.end()
 
 				if (sg.zoomed) {
-					//ui.m(ui.sp())
 					if (ui.icon_button(id+'.zoom_button', 'fas', sg.scale > 1 ? '\uf00e' : '\uf010', 0, ']')) {
 						sg.reset_zoom()
 						ui.redraw()
 					}
 				}
 
-				//ui.m(ui.sp())
-				ui.icon_button(id+'.grid_button', 'fas', '\uf00a', 0)
-				ui.button(id+'.grid_button_t', 'Sup? jl', 0)
+				if (ui.icon_button(id+'.grid_button', 'fas', '\uf00a', 0)) {
+					sg.show_grid = !sg.show_grid
+					ui.animate()
+				}
 
 			ui.end_h()
 
@@ -1822,6 +1836,7 @@ ui.box_widget('plan_view', {
 		cx.clip()
 
 		cx.translate(x00, y00)
+		cx.font = 'bold 14px sans-serif'
 
 		// fixed grid
 		cx.save()
@@ -1857,7 +1872,7 @@ ui.box_widget('plan_view', {
 		cx.fillStyle = ui.fg_color('label')
 		cx.fill()
 		let s = format_length(cm)
-		let tw = ui.measure_text(cx, s).w
+		let tw = ui.measure_text(cx, s).width
 		cx.fillText(s, x + d - tw, y - 2)
 		}
 
@@ -2477,7 +2492,8 @@ G.test_plan = house_plan({
 		},
 		{
 			segs: [
-				[[0,100],[400,100]],
+				[[100,300],[400,300]],
+				[[100,300],[100,100]],
 			],
 		},
 	],
