@@ -1015,7 +1015,7 @@ function house_plan(t) {
 			if (p.adj.length > 2) {
 				for (let cw = 0; cw <= 1; cw++) {
 					let p1 = next_adj(p0, p, cw, 1)
-					fix_cycles_containing(p0, p, p1 ?? p00, p1 ? 'insert' : 'insert', new_p)
+					fix_cycles_containing(p0, p, p1 ?? p00, p1 ? 'replace' : 'insert', new_p)
 				}
 			} else { // no _|_ segs on the sides.
 				fix_cycles_containing(p0, p, p00, 'insert', new_p)
@@ -1728,31 +1728,31 @@ ui.box_widget('plan_view', {
 			ui.h(0, 0, 's', 't')
 
 				if (!ui.window_focused) {
-					ui.stack()
-						ui.m(ui.sp())
-						ui.p(ui.sp075())
+					ui.stack('', 0)
+						//ui.m(ui.sp())
+						//ui.p(ui.sp075())
 						ui.font('far')
 						ui.fs(ui.xlarge())
-						ui.text('', '\uf11c', 0, '[', 't')
-						ui.polyline('', '8 17  40 32', null, null, null, 'text', null, 2)
+						ui.bb('', 'bg3')
+						ui.text('', '\uf11c', 0, 'c', 'c') // , 100, 100)
+						//ui.polyline('', '0 0  50 0   50 30   0 30', 1, null, null, 'text', null, 2)
 					ui.end_stack()
 				}
+				ui.text('', 'Bla jl', 0, '[')
+
+				ui.v(1); ui.end()
 
 				if (sg.zoomed) {
-					ui.m(ui.sp())
-					ui.font('fas')
-					//ui.font('mio')
-					//ui.fs(ui.xlarge())
-					if (ui.button(id+'.zoom_button',
-							//sg.scale > 1 ? '\ue8ff' : '\ue900', 0, ']', 't', // mio
-							//sg.scale > 1 ? '\uF2DB' : '\uF2DD', 0, ']', 't', // remix
-							sg.scale > 1 ? '\uf00e' : '\uf010', 0, ']', 't', // fas
-							)) // ui.em(2), ui.em(2)))
-					{
+					//ui.m(ui.sp())
+					if (ui.icon_button(id+'.zoom_button', 'fas', sg.scale > 1 ? '\uf00e' : '\uf010', 0, ']')) {
 						sg.reset_zoom()
 						ui.redraw()
 					}
 				}
+
+				//ui.m(ui.sp())
+				ui.icon_button(id+'.grid_button', 'fas', '\uf00a', 0)
+				ui.button(id+'.grid_button_t', 'Sup? jl', 0)
 
 			ui.end_h()
 
