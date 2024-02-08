@@ -96,19 +96,24 @@ function bbox_add_point(bb, x, y) {
 	bb[3] = max(bb[3], y)
 }
 
-function bb_inside(cbb, pbb) {
+function bbox_inside_bbox(cbb, pbb) {
 	let [px1, py1, px2, py2] = pbb
 	let [cx1, cy1, cx2, cy2] = cbb
 	return cx1 >= px1 && cx2 <= px2 && cy1 >= py1 && cy2 <= py2
 }
 
+function hit_bbox(x, y, bb) {
+	let [x1, y1, x2, y2] = bb
+	return x >= x1 && x <= x2 && y >= y1 && y <= y2
+}
+
 // polygon geometry ----------------------------------------------------------
 
 // NOTE: do `ps.push(ps[0], ps[1])` before you call this!
-function poly_area(ps) {
+function edges_area(eps) {
 	let area = 0
-	for (let i = 1, n = ps.length; i <= n; i++)
-		area += ps[mod(i, n)][0] * (ps[mod(i+1, n)][1] - ps[i-1][1])
+	for (let i = 1, n = eps.length; i <= n; i++)
+		area += ep_x(eps[mod(i, n)]) * (ep_y(eps[mod(i+1, n)]) - ep_y(eps[i-1]))
 	return area / 2
 }
 
@@ -132,13 +137,27 @@ function poly_center(ps) {
 	]
 }
 
-function point_inside_poly(x, y, ps) {
+function hit_poly(x, y, ps) {
 	let inside = false
 	for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
 		let xi = ps[i][0]
 		let yi = ps[i][1]
 		let xj = ps[j][0]
 		let yj = ps[j][1]
+		let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+		if (intersect)
+			inside = !inside
+	}
+	return inside
+}
+
+function hit_edges(x, y, eps) {
+	let inside = false
+	for (let i = 0, j = eps.length - 1; i < eps.length; j = i++) {
+		let xi = ep_x(eps[i])
+		let yi = ep_y(eps[i])
+		let xj = ep_x(eps[j])
+		let yj = ep_y(eps[j])
 		let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
 		if (intersect)
 			inside = !inside
@@ -426,7 +445,6 @@ function extract_cycles_for(comp) {
 		if (c[1] != c[c.length-1]) { // not started with a filament
 			c.i = gen_id('cycle')
 			c.comp = comp
-			c.area = abs(poly_area(c))
 			c.area_pos = poly_center(c)
 			comp.cycles.push(c)
 		}
@@ -447,7 +465,6 @@ function extract_outer_cycle_for(comp) {
 	c.i = gen_id('cycle')
 	c.outer = true
 	c.comp = comp
-	c.area = abs(poly_area(c))
 	c.area_pos = poly_center(c)
 	c.reverse()
 	comp.cycles.push(c)
@@ -515,7 +532,7 @@ function ep_x(ep) { return ep[0] + ep.p[0] }
 function ep_y(ep) { return ep[1] + ep.p[1] }
 
 let format_length = d => format_kcount(d / 1e2, 2)+'m'
-let format_area = a => format_kcount(a / 1e4)+'m²'
+let format_area = a => format_kcount(a / 1e4, 2)+'m²'
 
 function house_plan(t) {
 
@@ -523,7 +540,7 @@ function house_plan(t) {
 
 	let house_plan = {levels: levels}
 
-	function recompute_house_plan_bbox() {
+	function house_plan_bb() {
 		let bb = bbox()
 		for (let level of house_plan.levels) {
 			let level_plan = house_plan.level_plan(level)
@@ -540,6 +557,7 @@ function house_plan(t) {
 		let ps = level.ps; if (!ps) { ps = []; level.ps = ps; }
 		let segs = level.segs
 		let comps = []
+		let root_comps = []
 
 		let level_plan = {ps: ps, segs: segs, comps: comps, house_plan: house_plan}
 		level.level_plan = level_plan
@@ -819,6 +837,7 @@ function house_plan(t) {
 			comp.ps = []
 			comp.cycles = []
 			comp.segs = []
+			comp.islands = []
 			comps.push(comp)
 			return comp
 		}
@@ -855,63 +874,140 @@ function house_plan(t) {
 
 		// finding which components are inside islands -------------------------
 
-		function segs_bb(comp) {
+		function points_bb(ps) {
 			let bb = bbox()
-			for (let seg of comp.segs) {
-				let [x1, y1] = seg[0]
-				let [x2, y2] = seg[1]
-				bbox_add_bbox(bb, x1, y1, x2, y2)
+			for (let [x, y] of ps) {
+				bbox_add_point(bb, x, y)
 			}
 			return bb
 		}
 
-		function skin_bb(comp) {
+		function edges_bb(eps) {
 			let bb = bbox()
-			for (let ep of comp.outer_cycle.edges)
+			for (let ep of eps)
 				bbox_add_point(bb, ep_x(ep), ep_y(ep))
 			return bb
 		}
 
-		function plan_bb() {
+		function level_plan_bb() {
 			let bb = bbox()
-			for (let c of comps) {
-				bbox_add_bbox(bb, ...c.bb)
+			for (let co of comps) {
+				bbox_add_bbox(bb, ...co.outer_cycle.edges.bb)
 			}
 			return bb
 		}
 
-		function comp_inside(c, p) {
-			if (!bb_inside(c.bb, p.bb))
+		function is_inside_poly(c, ps, ps_bb) { // comp inside poly check
+			if (!bbox_inside_bbox(c.bb, ps_bb))
 				return false
-			return point_inside_poly(c.ps[0][0], c.ps[0][1], p.outer_cycle)
+			return hit_poly(c.ps[0][0], c.ps[0][1], ps)
+		}
+
+		function is_inside_comp(c, p) { // comp inside comp check
+			return is_inside_poly(c, p.ps, p.bb)
+		}
+
+		function is_inside_cycle(co, cy) { // comp inside cycle check
+			return is_inside_poly(co, cy, cy.bb)
+		}
+
+		// NOTE: O(n^2)
+		function is_directly_inside_comp(c, p) { // comp directly inside comp check
+			if (!is_inside_comp(c, p))
+				return false
+			for (let q of comps)
+				if (q != c && q != p && q.inside && is_inside_comp(c, q) && is_inside_comp(q, p))
+					return false
+			return true
 		}
 
 		function find_inside_comps() {
 
-			// seg-based bbox: enough for computing inside flag.
+			// point-based bbox: enough for computing inside flag.
 			for (let c of comps) {
 				c.inside = false
-				c.bb = segs_bb(c)
+				c.parent = null
+				c.islands.length = 0
+				c.bb = points_bb(c.ps)
+				for (let cy of c.cycles)
+					cy.bb = points_bb(cy)
 			}
-			level_plan.bb = plan_bb()
 
+			// set inside flag with O(n^2) in order to lower the n for the O(n^4) loop below.
+			root_comps.length = 0
 			for (let c of comps) {
-				if (c.inside)
+				for (let p of comps) {
+					if (p != c && is_inside_comp(c, p)) {
+						c.inside = true
+						break
+					}
+				}
+				if (!c.inside)
+					root_comps.push(c)
+			}
+
+			// NOTE: O(n^4) but only checks islands which should be rare.
+			for (let c of comps) {
+				if (!c.inside)
 					continue
 				for (let p of comps) {
-					if (p == c)
-						continue
-					if (comp_inside(c, p)) {
-						c.inside = true
-						log('comp {0} is inside', c.i)
+					if (p != c && is_directly_inside_comp(c, p)) {
+						c.parent = p
+						p.islands.push(c)
 					}
 				}
 			}
+
+			// assign islands to inner cycles.
+			for (let comp of comps) {
+				for (let cycle of comp.cycles) {
+					if (cycle.outer)
+						continue
+					cycle.islands = []
+					for (let icomp of comp.islands) {
+						if (is_inside_cycle(icomp, cycle)) {
+							cycle.islands.push(icomp)
+							log('comp {0} is inside comp {1} cycle {2}', icomp.i, comp.i, cycle.i)
+						}
+					}
+				}
+			}
+
 		}
+
+		function hit_cycle(x, y, c) {
+			if (c.outer)
+				return
+			if (!hit_bbox(x, y, c.edges.bb))
+				return
+			for (let icomp of c.islands) {
+				for (let c1 of icomp.cycles) {
+					let c2 = hit_cycle(x, y, c1)
+					if (c2)
+						return c2
+				}
+			}
+			if (!hit_edges(x, y, c.edges))
+				return
+			return c
+		}
+		function hit_cycles(x, y) {
+			for (let co of comps) {
+				for (let c of co.cycles) {
+					let hit_c = hit_cycle(x, y, c)
+					if (hit_c)
+						return hit_c
+				}
+			}
+		}
+		level_plan.hit_cycles = hit_cycles
 
 		// plan loading & validation -------------------------------------------
 
 		function extract_cycles() {
+
+			for (let c of comps)
+				c.cycles.length = 0
 
 			for (let c of comps)
 				extract_outer_cycle_for(c)
@@ -932,27 +1028,43 @@ function house_plan(t) {
 					)
 		}
 
-		function create_edges_for(c) {
-			c.edges = offset_poly(c, (c.outer ? (c.comp.inside ? -4 : -12) : -4))
+		function fix_areas_for(comp) {
+			for (let c of comp.cycles) {
+				if (c.outer)
+					continue
+				let a0 = c.edges.area
+				for (let icomp of c.islands) {
+					fix_areas_for(icomp)
+					c.edges.area -= icomp.outer_cycle.edges.area
+				}
+				let a1 = c.edges.area
+				if (0 && a1 != a0)
+					log('cycle {0} area fixed: {1} + {2} = {3}', c.i, a1, a0-a1, a0)
+			}
 		}
+
 		function create_edges() {
+
 			for (let p of ps)
 				p.max_offset = 0
+
 			for (let comp of comps) {
 				for (let c of comp.cycles) {
-					create_edges_for(c)
-					create_edges_for(comp.outer_cycle)
+					c.edges = offset_poly(c, (c.outer ? (c.comp.inside ? -4 : -12) : -4))
+					c.edges.bb = edges_bb(c.edges)
+					c.edges.area = abs(edges_area(c.edges))
 				}
 			}
 
-			// recompunte bbox now that we have the skin.
-			for (let c of comps)
-				c.bb = skin_bb(c)
-			level_plan.bb = plan_bb()
+			for (let c of root_comps)
+				fix_areas_for(c)
+
+			// compute the level plan bbox now that we have outer skins.
+			level_plan.bb = level_plan_bb()
 
 			// recompute house plan bbox.
-			if (house_plan.bb)
-				house_plan.bb = recompute_house_plan_bbox()
+			if (house_plan.bb) // not in init
+				house_plan.bb = house_plan_bb()
 
 		}
 
@@ -1446,7 +1558,7 @@ function house_plan(t) {
 	// face view UI ops ----------------------------------------------------
 
 	function face_bb(plan, vert) { // returns (x1, y1, x2, y2, min_depth, max_depth)
-		let [x1, y1, x2, y2] = plan_bb(plan)
+		let [x1, y1, x2, y2] = level_plan_bb(plan)
 		let h = 0
 		for (let lv of plan.levels)
 			h += lv.h
@@ -1464,7 +1576,7 @@ function house_plan(t) {
 	for (let level of house_plan.levels)
 		level.i = i++
 
-	house_plan.bb = recompute_house_plan_bbox()
+	house_plan.bb = house_plan_bb()
 
 	pop_log('PLAN LOADED')
 	pr_log()
@@ -1477,8 +1589,8 @@ function house_plan(t) {
 
 function scaler() {
 	let s = {}
-	let st = 5 // thickness of wall line stroke at 1:1 scale
-	let scale
+	let line_width = 2 // thickness of wall line stroke in pixels at 1:1 scale
+	let scale, margin
 	s.d = d => round(d * scale)
 	s.x = x => round(x * scale)
 	s.y = y => round(y * scale)
@@ -1490,12 +1602,14 @@ function scaler() {
 	function set_scale(sc) {
 		scale = sc
 		s.scale = sc
-		s.line_width = 1 + ((st * sc >> 1) * 2) // we seek an odd number for sharpness
+		// snap line width to an even number for sharpness
+		s.line_width = snap(line_width * sc, 2)
 	}
 	s.scale_to_fit = function(bb, w, h) {
 		if (s.zoomed) return
-		w -= 2*st
-		h -= 2*st
+		let margin = ceil(ui.em(2) + line_width)
+		w -= 2 * margin
+		h -= 2 * margin
 		let [x1, y1, x2, y2] = bb
 		let bw = x2 - x1
 		let bh = y2 - y1
@@ -1505,8 +1619,9 @@ function scaler() {
 			h / bh
 		))
 		if (!s.panned) {
-			s.x0 = -s.x(x1) + s.line_width // pixels from widget's origin
-			s.y0 = -s.y(y1) + s.line_width // pixels from widget's origin
+			// in pixels from widget's origin
+			s.x0 = -s.x(x1) + margin + round((w - s.d(x2 - x1)) / 2)
+			s.y0 = -s.y(y1) + margin + round((h - s.d(y2 - y1)) / 2)
 		}
 	}
 	s.set_scale = function(sc) {
@@ -1563,6 +1678,18 @@ function draw_grid(cx, sg, x0, y0, w, h, step, dark_color, light_color) {
 	}
 }
 
+function draw_edges(cx, sg, eps) {
+	for (let ep of eps) {
+		let x = sg.ep_x(ep)
+		let y = sg.ep_y(ep)
+		if (ep == eps[0])
+			cx.moveTo(x, y)
+		else
+			cx.lineTo(x, y)
+	}
+	cx.closePath()
+}
+
 // evaluate a line at time t using linear interpolation.
 // the time between 0..1 covers the segment interval.
 function point_on_line(t, x1, y1, x2, y2, out) {
@@ -1570,7 +1697,6 @@ function point_on_line(t, x1, y1, x2, y2, out) {
 	out[1] = y1 + t * (y2 - y1)
 	return out
 }
-
 let out = []
 function draw_length(cx, sg, x1, y1, x2, y2) {
 
@@ -1876,6 +2002,17 @@ ui.box_widget('plan_view', {
 		cx.fillText(s, x + d - tw, y - 2)
 		}
 
+		// help
+		{
+		let m = ui.em()
+		cx.fillStyle = ui.fg_color('label')
+		let action = cs?.get('action')
+		let s = (action == 'move_seg' || action == 'resize_seg')
+			? 'SHIFT = No Snap'
+			: 'SHIFT = Pan'
+		cx.fillText(s, m, h - m)
+		}
+
 		cx.translate(x0, y0)
 
 		// snap lines
@@ -1910,16 +2047,15 @@ ui.box_widget('plan_view', {
 					continue
 				if (!c.edges)
 					continue
+
 				cx.beginPath()
-				for (let ep of c.edges) {
-					let x = sg.ep_x(ep)
-					let y = sg.ep_y(ep)
-					if (ep == c.edges[0])
-						cx.moveTo(x, y)
-					else
-						cx.lineTo(x, y)
-				}
-				cx.closePath()
+
+				draw_edges(cx, sg, c.edges)
+
+				// island outer cycles are clockwise so they draw as holes.
+				for (let icomp of c.islands)
+					draw_edges(cx, sg, icomp.outer_cycle.edges)
+
 				cx.fillStyle = ui.alpha_adjust(ui.bg_color_hsl('bg1', hs?.get('cycle') == c ? 'hover' : null), .5)
 				cx.fill()
 			}
@@ -1931,19 +2067,9 @@ ui.box_widget('plan_view', {
 			cx.beginPath()
 
 			for (let c of comp.cycles) {
-				if (c.edges) {
-					for (let ep of c.edges) {
-						let [dx, dy] = ep
-						let [x0, y0] = ep.p
-						let x = sg.x(x0) + sg.d(dx)
-						let y = sg.y(y0) + sg.d(dy)
-						if (ep == c.edges[0])
-							cx.moveTo(x, y)
-						else
-							cx.lineTo(x, y)
-					}
-					cx.closePath()
-				}
+				if (!c.edges)
+					continue
+				draw_edges(cx, sg, c.edges)
 			}
 
 			if (!cx.wall_pattern) {
@@ -1961,27 +2087,46 @@ ui.box_widget('plan_view', {
 				x.fill()
 				cx.wall_pattern = cx.createPattern(c, 'repeat')
 			}
-			cx.lineWidth = DEBUG_PLAN ? 1 : sg.line_width
-			cx.strokeStyle = 'black' //ui.fg_color('text')
-			cx.lineJoin = 'round'
-			cx.stroke()
-			cx.lineJoin = 'miter'
-			cx.lineWidth = 1
-			cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
-			cx.fill('nonzero')
+			if (sg.scale > 0.4) {
+				cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
+				cx.fill('nonzero')
+				cx.lineWidth = DEBUG_PLAN ? 2 : sg.line_width
+				cx.strokeStyle = 'black' //ui.fg_color('text')
+				cx.lineJoin = 'round'
+				cx.stroke()
+				cx.lineJoin = 'miter'
+				cx.lineWidth = 1
+			} else if (sg.scale > 0.2) { // too small to stroke
+				cx.fillStyle = ui.fg_color('text')
+				cx.fill()
+			} else { // to small to even show edges
+				for (let seg of draw_state.segs) {
+					let x1 = sg.x(seg[0][0]) + .5
+					let y1 = sg.y(seg[0][1]) + .5
+					let x2 = sg.x(seg[1][0]) + .5
+					let y2 = sg.y(seg[1][1]) + .5
+					cx.beginPath()
+					cx.moveTo(x1, y1)
+					cx.lineTo(x2, y2)
+					cx.strokeStyle = ui.fg_color('text')
+					cx.stroke()
+				}
+			}
 		}
 
 		// cycles area
 		if (sg.scale > 0.4)
 			for (let co of draw_state.comps) {
 				for (let c of co.cycles) {
-					if (c.area) {
-						let [x, y] = c.area_pos
-						x = sg.x(x)
-						y = sg.y(y)
-						cx.fillStyle = ui.fg_color('label')
-						cx.fillText(format_area(c.area), x, y+5)
-					}
+					if (c.outer)
+						continue
+					let [x, y] = c.area_pos
+					x = sg.x(x)
+					y = sg.y(y)
+					cx.fillStyle = ui.fg_color('label')
+					let s = format_area(c.edges.area)
+					if (DEBUG_PLAN) s = co.i + '/' + c.i + ' ' + s
+					cx.fillText(s, x, y+5)
 				}
 			}
 
@@ -2158,6 +2303,8 @@ ui.box_widget('plan_view', {
 			return
 		}
 
+		let plan = ui.state(id).get('plan')
+
 		cx.save()
 		cx.translate(x00, y00)
 		cx.translate(draw_state.x0, draw_state.y0)
@@ -2242,30 +2389,17 @@ ui.box_widget('plan_view', {
 			let y = sg.plan_y(ui.my)
 
 			// hit snapping point
-			let [sx, sy] = ui.state(id).get('plan').snap_point(x, y, nosnap)
+			let [sx, sy] = plan.snap_point(x, y, nosnap)
 			hs.set('x', sx ?? x)
 			hs.set('y', sy ?? y)
 			if (sx != null) sl.push(sx, 1)
 			if (sy != null) sl.push(sy, 0)
 
 			// hit inner cycle
-			let hit_comp, hit_cycle
-			for (let co of draw_state.comps) {
-				for (let c of co.cycles) {
-					if (!c.edges)
-						continue
-					if (c.outer)
-						continue
-					if (point_inside_poly(x, y, c)) {
-						hit_comp = co
-						hit_cycle = c
-						hs.set('comp', co)
-						hs.set('cycle', c)
-						break
-					}
-				}
-				if (hit_cycle)
-					break
+			let hit_cycle = plan.hit_cycles(x, y)
+			if (hit_cycle) {
+				hs.set('comp' , hit_cycle.comp)
+				hs.set('cycle', hit_cycle)
 			}
 		}
 
@@ -2468,18 +2602,6 @@ G.test_plan = house_plan({
 				[[600,300],[600,400],],
 				[[600,300],[700,300]],
 
-				// island for testing inside check
-
-				// [[0,600],[300,600]],
-				// [[300,600],[300,900]],
-				// [[300,900],[0,900]],
-				// [[0,900],[0,600]],
-
-				// [[100,650],[200,650]],
-				// [[200,650],[200,800]],
-				// [[200,800],[100,800]],
-				// [[100,800],[100,650]],
-
 				// brick-like-layout for testing seg detach on seg move
 
 				// [[700,500],[700,1000]],
@@ -2496,6 +2618,29 @@ G.test_plan = house_plan({
 			segs: [
 				[[100,300],[400,300]],
 				[[100,300],[100,100]],
+
+				// island for testing inside check
+
+				[[0,600],[600,600]],
+				[[600,600],[600,1000]],
+				[[600,1000],[0,1000]],
+				[[0,1000],[0,600]],
+
+				[[100,650],[350,650]],
+				[[350,650],[350,900]],
+				[[350,900],[100,900]],
+				[[100,900],[100,650]],
+
+				[[150,700],[200,700]],
+				[[200,700],[200,800]],
+				[[200,800],[150,800]],
+				[[150,800],[150,700]],
+
+				[[300,700],[250,700]],
+				[[250,700],[250,800]],
+				[[250,800],[300,800]],
+				[[300,800],[300,700]],
+
 			],
 		},
 	],
