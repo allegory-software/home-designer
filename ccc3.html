@@ -1548,18 +1548,17 @@ function draw_grid(cx, sg, x0, y0, w, h, step, dark_color, light_color) {
 	if (sg.d(step) < 7)
 		return
 	let color = ui.dark() ? dark_color : light_color
+	cx.strokeStyle = color
 	for (let i = mod(sg.plan_x(x0), step), n = sg.plan_d(w); i < n; i += step) {
 		cx.beginPath()
 		cx.moveTo(sg.x(i), 0)
 		cx.lineTo(sg.y(i), h-1)
-		cx.strokeStyle = color
 		cx.stroke()
 	}
 	for (let i = mod(sg.plan_y(y0), step), n = sg.plan_d(h); i < n; i += step) {
 		cx.beginPath()
 		cx.moveTo(0, sg.x(i))
 		cx.lineTo(w-1, sg.y(i))
-		cx.strokeStyle = color
 		cx.stroke()
 	}
 }
@@ -1769,9 +1768,6 @@ ui.box_widget('plan_view', {
 					ui.animate()
 				}
 
-				if (ui.button('debug_plan_button', 'DEBUG'))
-					DEBUG_PLAN = !DEBUG_PLAN
-
 			ui.end_h()
 
 		ui.end_stack()
@@ -1883,6 +1879,8 @@ ui.box_widget('plan_view', {
 		cx.translate(x0, y0)
 
 		// snap lines
+		cx.setLineDash([5, 8])
+		cx.strokeStyle = ui.dark() ? '#555' : '#999'
 		for (let i = 0, sl = draw_state.snap_lines, n = sl.length; i < n; i += 2) {
 			let sa   = sl[i]
 			let is_v = sl[i+1]
@@ -1901,11 +1899,9 @@ ui.box_widget('plan_view', {
 			cx.beginPath()
 			cx.moveTo(x1+.5, y1+.5)
 			cx.lineTo(x2+.5, y2+.5)
-			cx.setLineDash([5, 8])
-			cx.strokeStyle = ui.dark() ? '#555' : '#999'
 			cx.stroke()
-			cx.setLineDash([])
 		}
+		cx.setLineDash([])
 
 		// room backgrounds
 		for (let co of draw_state.comps) {
@@ -1967,7 +1963,9 @@ ui.box_widget('plan_view', {
 			}
 			cx.lineWidth = DEBUG_PLAN ? 1 : sg.line_width
 			cx.strokeStyle = 'black' //ui.fg_color('text')
+			cx.lineJoin = 'round'
 			cx.stroke()
+			cx.lineJoin = 'miter'
 			cx.lineWidth = 1
 			cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
 			cx.fill('nonzero')
@@ -2044,7 +2042,6 @@ ui.box_widget('plan_view', {
 					cx.rotate(-PI/4)
 				cx.fillStyle = 'white' //ui.fg_color('label')
 				cx.strokeStyle = 'black'
-				cx.lineWidth = 1
 				cx.shadowBlur = 4
 				cx.shadowColor = 'black'
 				let s = format_length(m)
@@ -2511,12 +2508,13 @@ ui.main = function() {
 
 	ui.v()
 
-		ui.h(0)
+		ui.h(0, ui.sp05())
 
-			if (ui.button('btn_light', 'lights', 0)) {
+			if (ui.button('debug_plan_button', 'DEBUG', 0))
+				DEBUG_PLAN = !DEBUG_PLAN
+
+			if (ui.button('btn_light', 'lights', 0))
 				ui.default_theme = ui.default_theme == 'light' ? 'dark' : 'light'
-				ui.redraw()
-			}
 
 		ui.end_h()
 
@@ -2551,7 +2549,7 @@ ui.main = function() {
 
 }
 
-DEBUG_PLAN = 1
+DEBUG_PLAN = 0
 
 }()) // module function
 
