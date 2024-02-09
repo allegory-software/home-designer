@@ -1336,12 +1336,13 @@ function house_plan(t) {
 			function is_edge_v(ep1, ep2) {
 				let x1 = ep_x(ep1)
 				let x2 = ep_x(ep2)
-				return x1 == x2
+				return near(x1, x2)
 			}
 			// find the farthest edge point from `c.edges[i0]` going in `dir` direction
 			// in the array, which has the same spatial direction `v` with the previous point.
 			function last_perp_edge_point(c, i, n, dir, v) {
 				let ep0 = c.edges[mod(i, n)]
+				pr(ep0.p.i, i, n, dir, v)
 				while (1) {
 					let ep1 = c.edges[mod(i, n)]
 					let ep2 = c.edges[mod(i+dir, n)]
@@ -2154,7 +2155,8 @@ ui.box_widget('plan_view', {
 				let y1 = ep_y(ep1)
 				let x2 = ep_x(ep2)
 				let y2 = ep_y(ep2)
-				pr(ep1.ci, ep2.ci, x1, y1, x2, y2)
+				// pr('pi1', ep1.p.i, 'ci1', ep1.ci, 'pi2', ep2.p.i, 'ci2', ep2.ci,
+				// 	'x1y1', x1, y1, 'x2y2', x2, y2)
 				;[x1, y1, x2, y2] = line_offset(-10, x1, y1, x2, y2, [])
 				draw_length(cx, sg, x1, y1, x2, y2)
 			}
