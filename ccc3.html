@@ -4,7 +4,7 @@
 <base href="www2/">
 <link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
-<script src=glue.js global extend></script>
+<script src=glue.js global></script>
 <script src=ui.js></script>
 <script src=ui_validation.js></script>
 <script src=ui_nav.js></script>
@@ -23,11 +23,22 @@ let EPSILON = 1e-5
 
 function near(a, b) { return abs(a - b) < EPSILON }
 
-// debugging -----------------------------------------------------------------
+let out = []
+
+let floor_names = [
+	'GROUND FLOOR',
+	'1ˢᵗ FLOOR',
+	'2ⁿᵈ FLOOR',
+	'3ʳᵈ FLOOR',
+]
+
+// hierarchical buffered error logging ---------------------------------------
 
 let errs = []
 let log_stack = []
+let log_on = true
 function log(err, ...args) {
+	if (!log_on) return
 	errs.push(isstr(err) ? subst(err, ...args) : err)
 }
 function push_log() {
@@ -67,19 +78,17 @@ function pr_log() {
 	errs.length = 0
 }
 
-let next_id = {}
-function gen_id(k) {
-	if (!next_id[k])
-		next_id[k] = 1
-	else
-		next_id[k]++
-	return next_id[k]
-}
-
 // bbox geometry -------------------------------------------------------------
 
 function bbox() {
 	return [inf, inf, -inf, -inf] // x1, y1, x2, y2
+}
+
+function bbox_reset(bbox) {
+	bbox[0] =  inf
+	bbox[1] =  inf
+	bbox[2] = -inf
+	bbox[3] = -inf
 }
 
 function bbox_add_bbox(bb, x1, y1, x2, y2) {
@@ -96,6 +105,23 @@ function bbox_add_point(bb, x, y) {
 	bb[3] = max(bb[3], y)
 }
 
+function bbox_rotate(bb, a) {
+	let [x1, y1, x2, y2] = bb
+	if (!a)
+		return
+	let cx = (x2 + x1) / 2
+	let cy = (y2 + y1) / 2
+	let [p1x, p1y] = rotate_point(x1, y1, cx, cy, a)
+	let [p2x, p2y] = rotate_point(x1, y2, cx, cy, a)
+	let [p3x, p3y] = rotate_point(x2, y1, cx, cy, a)
+	let [p4x, p4y] = rotate_point(x2, y2, cx, cy, a)
+	bbox_reset(bb)
+	bbox_add_point(bb, p1x, p1y)
+	bbox_add_point(bb, p2x, p2y)
+	bbox_add_point(bb, p3x, p3y)
+	bbox_add_point(bb, p4x, p4y)
+}
+
 function bbox_inside_bbox(cbb, pbb) {
 	let [px1, py1, px2, py2] = pbb
 	let [cx1, cy1, cx2, cy2] = cbb
@@ -108,14 +134,6 @@ function hit_bbox(x, y, bb) {
 }
 
 // polygon geometry ----------------------------------------------------------
-
-// NOTE: do `ps.push(ps[0], ps[1])` before you call this!
-function edges_area(eps) {
-	let area = 0
-	for (let i = 1, n = eps.length; i <= n; i++)
-		area += ep_x(eps[mod(i, n)]) * (ep_y(eps[mod(i+1, n)]) - ep_y(eps[i-1]))
-	return area / 2
-}
 
 function poly_center(ps) {
 	let [x0, y0] = ps[0]
@@ -137,6 +155,7 @@ function poly_center(ps) {
 	]
 }
 
+// TODO: remove or ignore filaments
 function hit_poly(x, y, ps) {
 	let inside = false
 	for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
@@ -151,41 +170,12 @@ function hit_poly(x, y, ps) {
 	return inside
 }
 
-function hit_edges(x, y, eps) {
-	let inside = false
-	for (let i = 0, j = eps.length - 1; i < eps.length; j = i++) {
-		let xi = ep_x(eps[i])
-		let yi = ep_y(eps[i])
-		let xj = ep_x(eps[j])
-		let yj = ep_y(eps[j])
-		let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
-		if (intersect)
-			inside = !inside
-	}
-	return inside
-}
-
 // polygon offset algorithm --------------------------------------------------
-
-// hypotenuse function: computes sqrt(a^2 + b^2) without underflow / overflow problems.
-function hypot(a, b) {
-	if (a == 0 && b == 0) return 0
-	a = abs(a)
-	b = abs(b)
-	let M = max(a, b)
-	let m = min(a, b)
-	return M * sqrt(1 + (m / M)**2)
-}
-
-// distance between two points. avoids underflow and overflow.
-function distance(x1, y1, x2, y2) {
-	return hypot(x2-x1, y2-y1)
-}
 
 // parallel line segment at a distance on the right side of a segment.
 // use a negative distance for the left side, or reflect the returned points
 // against their respective initial points.
-function line_offset(d, x1, y1, x2, y2, out) {
+function line_offset(d, x1, y1, x2, y2) {
 	// normal vector of the same length as original segment.
 	let dx = -(y2-y1)
 	let dy =   x2-x1
@@ -200,7 +190,7 @@ function line_offset(d, x1, y1, x2, y2, out) {
 
 // evaluate a line at time t using linear interpolation.
 // the time between 0..1 covers the segment interval.
-function line_point(t, x1, y1, x2, y2, out) {
+function line_point(t, x1, y1, x2, y2) {
 	out[0] = x1 + t * (x2 - x1)
 	out[1] = y1 + t * (y2 - y1)
 	return out
@@ -230,14 +220,15 @@ function set_seg_offset(p1, p2, d) {
 	///assert(false, '#'+p1.segs.length)
 }
 
-function offset_corner(p0, p1, p2, d, out) {
+// TODO: implement fast path for axis-aligned segments.
+function offset_corner(p0, p1, p2, d) {
 	set_seg_offset(p0, p1, d)
 	set_seg_offset(p1, p2, d)
 	p0.max_offset = max(p0.max_offset, abs(d))
 	p1.max_offset = max(p1.max_offset, abs(d))
 	p2.max_offset = max(p2.max_offset, abs(d))
-	let [x1, y1, x2, y2] = line_offset( d, p0[0], p0[1], p1[0], p1[1], out)
-	let [x3, y3, x4, y4] = line_offset(-d, p2[0], p2[1], p1[0], p1[1], out)
+	let [x1, y1, x2, y2] = line_offset( d, p0[0], p0[1], p1[0], p1[1])
+	let [x3, y3, x4, y4] = line_offset(-d, p2[0], p2[1], p1[0], p1[1])
 	let t1 = line_line_intersection(x1, y1, x2, y2, x3, y3, x4, y4)
 	if (abs(t1) == inf) { // 0-degree corner: make a line cap of 2 points, 1*d thick
 		let dx = x2 == x4 ? d * sign(x1 - x2) : 0
@@ -254,7 +245,13 @@ function offset_corner(p0, p1, p2, d, out) {
 	} else { // bent corner
 		out[2] = null
 		out[3] = null
-		line_point(t1, x1, y1, x2, y2, out)
+		if (x1 == x2 && y3 == y4 || y1 == y2 && x3 == x4) { // axis-aligned and _|_ to each other
+			let t1s = -sign(t1-1) // branchless version of t1 < 1 ? 1 : -1
+			out[0] = x2 + d * sign(x2 - x1) * t1s
+			out[1] = y2 + d * sign(y2 - y1) * t1s
+		} else {
+			line_point(t1, x1, y1, x2, y2)
+		}
 	}
 	return out
 }
@@ -268,7 +265,6 @@ function points_colinear(p0, p1, p2) {
 
 function offset_poly(ps, d) {
 	let ops = []
-	let out = []
 
 	// remove null segments as we can't offset those (they don't have a normal).
 	let ps1 = ps
@@ -295,7 +291,7 @@ function offset_poly(ps, d) {
 			let i2 = i+1
 			let p0 = ps[mod(i0--, n)]
 			let p2 = ps[mod(i2++, n)]
-			let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d, out)
+			let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d)
 			let [x0, y0] = p1
 			let op1 = [x1 - x0, y1 - y0]
 			op1.p = p1
@@ -371,6 +367,8 @@ function left_bottom_point(ps) {
 
 // return a number from the range [0..4) which is monotonically increasing
 // with the clockwise angle that the input vector makes against the x axis.
+// NOTE: one branch miss (20cy) + one division (4cy) is still faster than atan2 (100cy).
+// Then again, one cache miss is 100cy so all this is irrelevant.
 function pseudo_angle(dx, dy) {
 	let p = dx / (abs(dx) + abs(dy))  // -1..0 (x <= 0) or 0..1 (x >= 0)
 	return dy < 0 ? 3 + p : 1 - p     //  2..4 (y <= 0) or 0..2 (y >= 0)
@@ -437,7 +435,7 @@ function closed_walk(first, outer_cycle) {
 	return walk
 }
 
-function extract_cycles_for(comp) {
+function extract_cycles_for(comp, gen_id) {
 	let ps = [...comp.ps]
 	while (ps.length > 0) {
 		let p = left_bottom_point(ps)
@@ -459,19 +457,19 @@ function extract_cycles_for(comp) {
 	}
 }
 
-function extract_outer_cycle_for(comp) {
+function extract_outer_cycle_for(comp, gen_id) {
 	let p = left_bottom_point(comp.ps)
 	let c = closed_walk(p, true)
-	c.i = gen_id('cycle')
+	c.reverse() // outer cycle must go clockwise
 	c.outer = true
+	c.i = gen_id('cycle')
 	c.comp = comp
 	c.area_pos = poly_center(c)
-	c.reverse()
 	comp.cycles.push(c)
 	comp.outer_cycle = c
 }
 
-// house plan model ----------------------------------------------------------
+// house plan model utils ----------------------------------------------------
 
 function is_h(seg) { return seg[0][1] == seg[1][1] }
 function is_v(seg) { return seg[0][0] == seg[1][0] }
@@ -531,501 +529,611 @@ function seg_center(seg) {
 function ep_x(ep) { return ep[0] + ep.p[0] }
 function ep_y(ep) { return ep[1] + ep.p[1] }
 
+function edge_is_v(ep1, ep2) {
+	let x1 = ep_x(ep1)
+	let x2 = ep_x(ep2)
+	// near() not need here since we special-case offseting axis-aligned _|_ segs.
+	return near(x1, x2)
+}
+
+// face plan model utils -----------------------------------------------------
+
+// NOTE: face is 1,2,3,4 going clockwise from the left-side face.
+let face_is_v = face => face & 1
+let face_sign = face => (face & 2) - 1
+
+G.v = face_is_v
+G.s = face_sign
+
+// view utils ----------------------------------------------------------------
+
 let format_length = d => format_kcount(d / 1e2, 2)+'m'
 let format_area = a => format_kcount(a / 1e4, 2)+'m²'
 
-function house_plan(t) {
+function plan2d(e) {
 
-	let levels = t.levels
+	e.ps ??= []
+	e.segs ??= []
+	e.comps = []
+	e.root_comps = []
 
-	let house_plan = {levels: levels}
+	let gen_id = e.gen_id
+	let ps = e.ps
+	let segs = e.segs
+	let comps = e.comps
+	let root_comps = e.root_comps
 
-	function house_plan_bb() {
+	// model editing -------------------------------------------------------
+
+	function init_point(p, i) {
+		p.segs = []
+		p.adj = []
+		p.i = gen_id('point')
+	}
+
+	function add_point(x, y) {
+		let p = [x, y]
+		init_point(p, ps.length)
+		ps.push(p)
+		log('point added: {0} {1},{2}', p.i, x, y)
+		return p
+	}
+	e.add_point = add_point
+
+	function rem_point(p) {
+		remove_value(ps, p)
+		log('point removed: {0}', p.i)
+	}
+
+	function rem_points(cond, msg) {
+		let a = []
+		remove_values(ps, function(p) {
+			if (!cond(p)) return
+			a.push(p.i)
+			return true
+		})
+		if (a.length)
+			log('{0} removed: {1}', msg ?? 'points', a.join(' '))
+	}
+
+	function add_seg_ref(p, seg) {
+		p.segs.push(seg)
+	}
+
+	function rem_seg_ref(p, seg) {
+		remove_value(p.segs, seg)
+	}
+
+	function add_seg_refs(seg) {
+		add_seg_ref(seg[0], seg)
+		add_seg_ref(seg[1], seg)
+	}
+
+	function rem_seg_refs(seg) {
+		rem_seg_ref(seg[0], seg)
+		rem_seg_ref(seg[1], seg)
+	}
+
+	function add_seg(p1, p2) {
+		let seg = [p1, p2]
+		seg.i = gen_id('seg')
+		segs.push(seg)
+		add_seg_refs(seg)
+		log('seg added: {0}: {1} {2}', seg.i, seg[0].i, seg[1].i)
+		return seg
+	}
+	e.add_seg = add_seg
+
+	function rem_seg(seg) {
+		rem_seg_refs(seg)
+		remove_value(segs, seg)
+		log('seg removed: {0}', seg.i)
+	}
+
+	function rem_segs(cond, msg) {
+		let a = []
+		remove_values(segs, function(seg) {
+			if (!cond(seg)) return
+			rem_seg_refs(seg)
+			a.push(seg.i)
+			return true
+		})
+		if (log && a.length)
+			log('{0} removed: {1}', msg ?? 'segs', a.join(','))
+	}
+
+	function rem_marked_segs(msg) {
+		rem_segs(seg => seg.removed, msg)
+	}
+
+	function set_seg_point(seg, i, p) {
+		let old_p = seg[i]
+		rem_seg_ref(old_p, seg)
+		seg[i] = p
+		add_seg_ref(p, seg)
+		log('seg end moved: {0}/{1}: {2}->{3}', seg.i, i, old_p.i, p.i)
+		return old_p
+	}
+	e.set_seg_point = set_seg_point
+
+	// model fixing --------------------------------------------------------
+
+	function rebuild_seg_refs() {
+		for (let p of ps)
+			p.segs.length = 0
+		for (let seg of segs)
+			add_seg_refs(seg)
+	}
+
+	function remove_isolated_points() {
+		rem_points(p => p.segs.length == 0, 'isolated points')
+	}
+
+	function remove_null_segs() {
+		rem_segs(is_null, 'null segs')
+	}
+
+	function remove_angled_segs() {
+		rem_segs(seg => seg_dir(seg) == '/', 'angled segs')
+	}
+
+	// NOTE: assumes segs are sorted, null segs removed, points deduplicated.
+	function merge_colinear_segs() {
+		for (let p of ps) {
+			if (p.segs.length == 2) {
+				let s1 = p.segs[0]
+				let s2 = p.segs[1]
+				if (is_v(s1) && is_v(s2) || is_h(s1) && is_h(s2)) { // colinear
+					let s1_pi = seg_pi(s1, p)
+					let s2_p2 = s2[1-seg_pi(s2, p)]
+					push_log()
+					set_seg_point(s1, s1_pi, s2_p2)
+					rem_seg(s2)
+					pop_log('segs merged: {0} + {1} => {0}', s1.i, s2.i, s1.i)
+				}
+			}
+		}
+	}
+
+	// shortens seg at m with new point and adds new seg without detaching the original seg's end-points.
+	function split_seg_at(seg, m) {
+		push_log()
+		let m1 = seg_m1(seg)
+		let m2 = seg_m2(seg)
+		let x = is_v(seg) ? seg_x1(seg) : m
+		let y = is_v(seg) ? m : seg_y1(seg)
+		let new_p = add_point(x, y)
+		let old_p = set_seg_point(seg, seg_i2(seg), new_p)
+		let new_seg = add_seg(new_p, old_p)
+		pop_log('seg split: {0} {4}>{1}<{5} => {2} {3}', seg.i, m, seg.i, new_seg.i, m1, m2)
+	}
+
+	// NOTE: only works for h and v segs.
+	function split_intersecting_segs_on(v) {
+		push_log()
+		for (let seg1 of segs) {
+			if (is_v(seg1) == v) {
+				for (let seg2 of segs) {
+					if (is_v(seg2) != v) {
+						let m1  = seg_m1(seg1)
+						let m2  = seg_m2(seg1)
+						let bm1 = seg_m1(seg2)
+						let bm2 = seg_m2(seg2)
+						let a   = seg_axis(seg1)
+						let ba  = seg_axis(seg2)
+						if (bm1 <= a && bm2 >= a && ba > m1 && ba < m2) {
+							// splitting adds a seg at the end of segs array which will
+							// be also tested in the outer loop and possibly split further.
+							// the shortened seg is potentially split multiple times
+							// in this inner loop.
+							split_seg_at(seg1, ba)
+						}
+					}
+				}
+			}
+		}
+		pop_log('split all intersecting segs')
+	}
+	function split_intersecting_segs() {
+		split_intersecting_segs_on(0)
+		split_intersecting_segs_on(1)
+	}
+
+	// NOTE: leaves isolated points behind.
+	function points_cmp(p1, p2) {
+		let dx = p1[0] - p2[0]; if (dx) return dx
+		let dy = p1[1] - p2[1]; if (dy) return dy
+		return p1.i - p2.i
+	}
+	function deduplicate_points() {
+		push_log()
+		ps.sort(points_cmp)
+		let p0
+		for (let i = 0; i < ps.length; i++) {
+			let p = ps[i]
+			if (p0 && points_equal(p, p0)) {
+				for (let j = 0; j < p.segs.length; j++) { // each connected seg
+					let seg = p.segs[j]
+					for (let i = 0; i < 2; i++) // each seg end
+						if (seg[i] == p) {
+							set_seg_point(seg, i, p0, 'seg end point dedup')
+							j-- // because seg was just removed from p.segs
+						}
+				}
+				continue
+			}
+			p0 = p
+		}
+		pop_log('deduplicate all points')
+	}
+
+	// NOTE: requires no intersecting segments.
+	function break_overlapping_segs() {
+		push_log()
+		segs.sort(function(s1, s2) {
+			// level 1 grouping by direction
+			let v1 = is_v(s1)
+			let v2 = is_v(s2)
+			let dv = v1 - v2
+			if (dv) return dv
+			// level 2 grouping by axis
+			let m1 = seg_axis(s1)
+			let m2 = seg_axis(s2)
+			let dm = m1 - m2
+			if (dm) return dm
+			// level 3 grouping by starting point because most segments are
+			// non-overlapping and we want to skip those quickly.
+			let i = v1 ? 1 : 0
+			let c1 = min(s1[0][i], s1[1][i])
+			let c2 = min(s2[0][i], s2[1][i])
+			return c1 - c2
+		})
+		let i0, v0, m0
+		for (let i = 0, n = segs.length; i <= n; i++) {
+			let seg = segs[i]
+			let v = seg ? is_v(seg) : null
+			let m = seg ? seg_axis(seg) : null
+			if (v0 == null) {
+				i0 = i
+				v0 = v
+				m0 = m
+			} else if (v != v0 || m != m0) {
+				if (i >= i0 + 2) { // there's at least 2 segments on this axis
+					for (let j = i0+1; j < i; j++) {
+						let seg1 = segs[j]
+						let seg0 = segs[j-1]
+						let m1_1 = seg_m1(seg1)
+						let m2_0 = seg_m2(seg0)
+						if (m1_1 < m2_0) {
+							// seg points that are overlapping segs have no _|_ joints
+							// or they wouldn't be overlapping the seg, so it's safe
+							// to remove the overlapping seg as long as we elongate
+							// the overlapped seg.
+							log('segs overlap: {0} {1}: {2}<={3}: seg {1} removed, seg {0}.m2 set to {4}',
+								seg0.i, seg1.i, m1_1, m2_0, seg_m2(seg1))
+							seg1.removed = true
+							set_seg_m2(seg0, max(seg_m2(seg1), seg_m2(seg0)))
+						}
+					}
+				}
+				i0 = i
+				v0 = v
+				m0 = m
+			}
+		}
+		rem_marked_segs()
+		pop_log('breaking overlapping colinear segs')
+	}
+
+	// finding graph components --------------------------------------------
+
+	function add_comp() {
+		let comp = {}
+		comp.i = gen_id('comp')
+		comp.ps = []
+		comp.cycles = []
+		comp.segs = []
+		comp.islands = []
+		comps.push(comp)
+		return comp
+	}
+
+	// NOTE: needs adj refs
+	function find_comps() {
+
+		for (let p of ps)
+			p.visited = false
+
+		comps.length = 0
+
+		function dfs(p, ps, segs) {
+			p.visited = true
+			ps.push(p)
+			for (let seg of p.segs)
+				segs.add(seg)
+			for (p of p.adj)
+				if (!p.visited)
+					dfs(p, ps, segs)
+		}
+
+		for (let p of ps) {
+			if (!p.visited) {
+				let comp = add_comp()
+				let segs = set()
+				dfs(p, comp.ps, segs)
+				comp.segs = set_toarray(segs)
+				log('comp {0}: {1}', comp.i, comp.ps.map(p=>p.i).join(' '))
+			}
+		}
+
+	}
+
+	// finding which components are inside islands -------------------------
+
+	function points_bb(ps) {
 		let bb = bbox()
-		for (let level of house_plan.levels) {
-			let level_plan = house_plan.level_plan(level)
-			bbox_add_bbox(bb, ...level_plan.bb)
+		for (let [x, y] of ps) {
+			bbox_add_point(bb, x, y)
 		}
 		return bb
 	}
 
-	function level_plan(level) {
+	function edges_bb(eps) {
+		let bb = bbox()
+		for (let ep of eps)
+			bbox_add_point(bb, ep_x(ep), ep_y(ep))
+		return bb
+	}
 
-		if (level.level_plan)
-			return level.level_plan
-
-		let ps = level.ps; if (!ps) { ps = []; level.ps = ps; }
-		let segs = level.segs
-		let comps = []
-		let root_comps = []
-
-		let level_plan = {ps: ps, segs: segs, comps: comps, house_plan: house_plan}
-		level.level_plan = level_plan
-
-		// model editing -------------------------------------------------------
-
-		function init_point(p, i) {
-			p.segs = []
-			p.adj = []
-			p.i = i
+	function plan_bb() {
+		let bb = bbox()
+		for (let co of comps) {
+			bbox_add_bbox(bb, ...co.outer_cycle.edges.bb)
 		}
+		return bb
+	}
 
-		function add_point(x, y) {
-			let p = [x, y]
-			init_point(p, ps.length)
-			ps.push(p)
-			log('point added: {0}', p.i)
-			return p
-		}
-		level_plan.add_point = add_point
+	function is_inside_poly(c, ps, ps_bb) { // comp inside poly check
+		if (!bbox_inside_bbox(c.bb, ps_bb))
+			return false
+		return hit_poly(c.ps[0][0], c.ps[0][1], ps)
+	}
 
-		function rem_point(p) {
-			remove_value(ps, p)
-			log('point removed: {0}', p.i)
-		}
+	function is_inside_comp(c, p) { // comp inside comp check
+		return is_inside_poly(c, p.ps, p.bb)
+	}
 
-		function rem_points(cond, msg) {
-			let a = []
-			remove_values(ps, function(p) {
-				if (!cond(p)) return
-				a.push(p.i)
-				return true
-			})
-			if (a.length)
-				log('{0} removed: {1}', msg ?? 'points', a.join(' '))
-		}
+	function is_inside_cycle(co, cy) { // comp inside cycle check
+		return is_inside_poly(co, cy, cy.bb)
+	}
 
-		function add_seg_ref(p, seg) {
-			p.segs.push(seg)
-		}
-
-		function rem_seg_ref(p, seg) {
-			remove_value(p.segs, seg)
-		}
-
-		function add_seg_refs(seg) {
-			add_seg_ref(seg[0], seg)
-			add_seg_ref(seg[1], seg)
-		}
-
-		function rem_seg_refs(seg) {
-			rem_seg_ref(seg[0], seg)
-			rem_seg_ref(seg[1], seg)
-		}
-
-		function add_seg(p1, p2) {
-			let seg = [p1, p2]
-			seg.i = segs.length
-			segs.push(seg)
-			add_seg_refs(seg)
-			log('seg added: {0}: {1} {2}', seg.i, seg[0].i, seg[1].i)
-			return seg
-		}
-		level_plan.add_seg = add_seg
-
-		function rem_seg(seg) {
-			rem_seg_refs(seg)
-			remove_value(segs, seg)
-			log('seg removed: {0}', seg.i)
-		}
-
-		function rem_segs(cond, msg) {
-			let a = []
-			remove_values(segs, function(seg) {
-				if (!cond(seg)) return
-				rem_seg_refs(seg)
-				a.push(seg.i)
-				return true
-			})
-			if (log && a.length)
-				log('{0} removed: {1}', msg ?? 'segs', a.join(','))
-		}
-
-		function rem_marked_segs(msg) {
-			rem_segs(seg => seg.removed, msg)
-		}
-
-		function set_seg_point(seg, i, p) {
-			let old_p = seg[i]
-			rem_seg_ref(old_p, seg)
-			seg[i] = p
-			add_seg_ref(p, seg)
-			log('seg end moved: {0}/{1}: {2}->{3}', seg.i, i, old_p.i, p.i)
-			return old_p
-		}
-
-		// model fixing --------------------------------------------------------
-
-		function rebuild_seg_refs() {
-			for (let p of ps)
-				p.segs.length = 0
-			for (let seg of segs)
-				add_seg_refs(seg)
-		}
-
-		function remove_isolated_points() {
-			rem_points(p => p.segs.length == 0, 'isolated points')
-		}
-
-		function remove_null_segs() {
-			rem_segs(is_null, 'null segs')
-		}
-
-		function remove_angled_segs() {
-			rem_segs(seg => seg_dir(seg) == '/', 'angled segs')
-		}
-
-		// NOTE: assumes segs are sorted, null segs removed, points deduplicated.
-		function merge_colinear_segs() {
-			for (let p of ps) {
-				if (p.segs.length == 2) {
-					let s1 = p.segs[0]
-					let s2 = p.segs[1]
-					if (is_v(s1) && is_v(s2) || is_h(s1) && is_h(s2)) { // colinear
-						let s1_pi = seg_pi(s1, p)
-						let s2_p2 = s2[1-seg_pi(s2, p)]
-						push_log()
-						set_seg_point(s1, s1_pi, s2_p2)
-						rem_seg(s2)
-						pop_log('segs merged: {0} + {1} => {0}', s1.i, s2.i, s1.i)
-					}
-				}
-			}
-		}
-
-		// shortens seg at m with new point and adds new seg without detaching the original seg's end-points.
-		function split_seg_at(seg, m) {
-			push_log()
-			let m1 = seg_m1(seg)
-			let m2 = seg_m2(seg)
-			let x = is_v(seg) ? seg_x1(seg) : m
-			let y = is_v(seg) ? m : seg_y1(seg)
-			let new_p = add_point(x, y)
-			let old_p = set_seg_point(seg, seg_i2(seg), new_p)
-			let new_seg = add_seg(new_p, old_p)
-			pop_log('seg split: {0} {4}>{1}<{5} => {2} {3}', seg.i, m, seg.i, new_seg.i, m1, m2)
-		}
-
-		// NOTE: only works for h and v segs.
-		function split_intersecting_segs_on(v) {
-			push_log()
-			for (let seg1 of segs) {
-				if (is_v(seg1) == v) {
-					for (let seg2 of segs) {
-						if (is_v(seg2) != v) {
-							let m1  = seg_m1(seg1)
-							let m2  = seg_m2(seg1)
-							let bm1 = seg_m1(seg2)
-							let bm2 = seg_m2(seg2)
-							let a   = seg_axis(seg1)
-							let ba  = seg_axis(seg2)
-							if (bm1 <= a && bm2 >= a && ba > m1 && ba < m2) {
-								// splitting adds a seg at the end of segs array which will
-								// be also tested in the outer loop and possibly split further.
-								// the shortened seg is potentially split multiple times
-								// in this inner loop.
-								split_seg_at(seg1, ba)
-							}
-						}
-					}
-				}
-			}
-			pop_log('split all intersecting segs')
-		}
-		function split_intersecting_segs() {
-			split_intersecting_segs_on(0)
-			split_intersecting_segs_on(1)
-		}
-
-		// NOTE: leaves isolated points behind.
-		function points_cmp(p1, p2) {
-			if (p1[0] < p2[0]) return -1
-			if (p1[0] > p2[0]) return  1
-			if (p1[1] < p2[1]) return -1
-			if (p1[1] > p2[1]) return  1
-			if (p1.i < p2.i) return -1
-			if (p1.i > p2.i) return  1
-			return 0
-		}
-		function deduplicate_points() {
-			push_log()
-			ps.sort(points_cmp)
-			let p0
-			for (let i = 0; i < ps.length; i++) {
-				let p = ps[i]
-				if (p0 && points_equal(p, p0)) {
-					for (let j = 0; j < p.segs.length; j++) { // each connected seg
-						let seg = p.segs[j]
-						for (let i = 0; i < 2; i++) // each seg end
-							if (seg[i] == p) {
-								set_seg_point(seg, i, p0, 'seg end point dedup')
-								j-- // because seg was just removed from p.segs
-							}
-					}
-					continue
-				}
-				p0 = p
-			}
-			pop_log('deduplicate all points')
-		}
-
-		// NOTE: requires no intersecting segments.
-		function break_overlapping_segs() {
-			push_log()
-			segs.sort(function(s1, s2) {
-				let v1 = is_v(s1)
-				let v2 = is_v(s2)
-				// level 1 grouping by direction
-				if (v1 < v2) return -1
-				if (v1 > v2) return  1
-				let m1 = seg_axis(s1)
-				let m2 = seg_axis(s2)
-				// level 2 grouping by axis
-				if (m1 < m2) return -1
-				if (m1 > m2) return  1
-				// level 3 grouping by starting point because most segments are
-				// non-overlapping and we want to skip those quickly.
-				let i = v1 ? 1 : 0
-				let c1 = min(s1[0][i], s1[1][i])
-				let c2 = min(s2[0][i], s2[1][i])
-				if (c1 < c2) return -1
-				if (c1 > c2) return  1
-				return 0
-			})
-			let i0, v0, m0
-			for (let i = 0, n = segs.length; i <= n; i++) {
-				let seg = segs[i]
-				let v = seg ? is_v(seg) : null
-				let m = seg ? seg_axis(seg) : null
-				if (v0 == null) {
-					i0 = i
-					v0 = v
-					m0 = m
-				} else if (v != v0 || m != m0) {
-					if (i >= i0 + 2) { // there's at least 2 segments on this axis
-						for (let j = i0+1; j < i; j++) {
-							let seg1 = segs[j]
-							let seg0 = segs[j-1]
-							let m1_1 = seg_m1(seg1)
-							let m2_0 = seg_m2(seg0)
-							if (m1_1 < m2_0) {
-								// seg points that are overlapping segs have no _|_ joints
-								// or they wouldn't be overlapping the seg, so it's safe
-								// to remove the overlapping seg as long as we elongate
-								// the overlapped seg.
-								log('segs overlap: {0} {1}: {2}<={3}: seg {1} removed, seg {0}.m2 set to {4}',
-									seg0.i, seg1.i, m1_1, m2_0, seg_m2(seg1))
-								seg1.removed = true
-								set_seg_m2(seg0, max(seg_m2(seg1), seg_m2(seg0)))
-							}
-						}
-					}
-					i0 = i
-					v0 = v
-					m0 = m
-				}
-			}
-			rem_marked_segs()
-			pop_log('breaking overlapping colinear segs')
-		}
-
-		// finding graph components --------------------------------------------
-
-		function add_comp() {
-			let comp = {}
-			comp.i = comps.length
-			comp.ps = []
-			comp.cycles = []
-			comp.segs = []
-			comp.islands = []
-			comps.push(comp)
-			return comp
-		}
-
-		// NOTE: needs adj refs
-		function find_comps() {
-
-			for (let p of ps)
-				p.visited = false
-
-			comps.length = 0
-
-			function dfs(p, ps, segs) {
-				p.visited = true
-				ps.push(p)
-				for (let seg of p.segs)
-					segs.add(seg)
-				for (p of p.adj)
-					if (!p.visited)
-						dfs(p, ps, segs)
-			}
-
-			for (let p of ps) {
-				if (!p.visited) {
-					let comp = add_comp()
-					let segs = set()
-					dfs(p, comp.ps, segs)
-					comp.segs = set_toarray(segs)
-					log('comp {0}: {1}', comp.i, comp.ps.map(p=>p.i).join(' '))
-				}
-			}
-
-		}
-
-		// finding which components are inside islands -------------------------
-
-		function points_bb(ps) {
-			let bb = bbox()
-			for (let [x, y] of ps) {
-				bbox_add_point(bb, x, y)
-			}
-			return bb
-		}
-
-		function edges_bb(eps) {
-			let bb = bbox()
-			for (let ep of eps)
-				bbox_add_point(bb, ep_x(ep), ep_y(ep))
-			return bb
-		}
-
-		function level_plan_bb() {
-			let bb = bbox()
-			for (let co of comps) {
-				bbox_add_bbox(bb, ...co.outer_cycle.edges.bb)
-			}
-			return bb
-		}
-
-		function is_inside_poly(c, ps, ps_bb) { // comp inside poly check
-			if (!bbox_inside_bbox(c.bb, ps_bb))
+	// NOTE: O(n^2)
+	function is_directly_inside_comp(c, p) { // comp directly inside comp check
+		if (!is_inside_comp(c, p))
+			return false
+		for (let q of comps)
+			if (q != c && q != p && q.inside && is_inside_comp(c, q) && is_inside_comp(q, p))
 				return false
-			return hit_poly(c.ps[0][0], c.ps[0][1], ps)
+		return true
+	}
+
+	function find_inside_comps() {
+
+		// point-based bbox: enough for computing inside flag.
+		for (let c of comps) {
+			c.inside = false
+			c.parent = null
+			c.islands.length = 0
+			c.bb = points_bb(c.ps)
+			for (let cy of c.cycles)
+				cy.bb = points_bb(cy)
 		}
 
-		function is_inside_comp(c, p) { // comp inside comp check
-			return is_inside_poly(c, p.ps, p.bb)
-		}
-
-		function is_inside_cycle(co, cy) { // comp inside cycle check
-			return is_inside_poly(co, cy, cy.bb)
-		}
-
-		// NOTE: O(n^2)
-		function is_directly_inside_comp(c, p) { // comp directly inside comp check
-			if (!is_inside_comp(c, p))
-				return false
-			for (let q of comps)
-				if (q != c && q != p && q.inside && is_inside_comp(c, q) && is_inside_comp(q, p))
-					return false
-			return true
-		}
-
-		function find_inside_comps() {
-
-			// point-based bbox: enough for computing inside flag.
-			for (let c of comps) {
-				c.inside = false
-				c.parent = null
-				c.islands.length = 0
-				c.bb = points_bb(c.ps)
-				for (let cy of c.cycles)
-					cy.bb = points_bb(cy)
-			}
-
-			// set inside flag with O(n^2) in order to lower the n for the O(n^4) loop below.
-			root_comps.length = 0
-			for (let c of comps) {
-				for (let p of comps) {
-					if (p != c && is_inside_comp(c, p)) {
-						c.inside = true
-						break
-					}
+		// set inside flag with O(n^2) in order to lower the n for the O(n^4) loop below.
+		root_comps.length = 0
+		for (let c of comps) {
+			for (let p of comps) {
+				if (p != c && is_inside_comp(c, p)) {
+					c.inside = true
+					break
 				}
-				if (!c.inside)
-					root_comps.push(c)
 			}
+			if (!c.inside)
+				root_comps.push(c)
+		}
 
-			// NOTE: O(n^4) but only checks islands which should be rare.
-			for (let c of comps) {
-				if (!c.inside)
+		// NOTE: O(n^4) but only checks islands which should be rare.
+		for (let c of comps) {
+			if (!c.inside)
+				continue
+			for (let p of comps) {
+				if (p != c && is_directly_inside_comp(c, p)) {
+					c.parent = p
+					p.islands.push(c)
+				}
+			}
+		}
+
+		// assign islands to inner cycles.
+		for (let comp of comps) {
+			for (let cycle of comp.cycles) {
+				if (cycle.outer)
 					continue
-				for (let p of comps) {
-					if (p != c && is_directly_inside_comp(c, p)) {
-						c.parent = p
-						p.islands.push(c)
+				cycle.islands = []
+				for (let icomp of comp.islands) {
+					if (is_inside_cycle(icomp, cycle)) {
+						cycle.islands.push(icomp)
+						log('comp {0} is inside comp {1} cycle {2}', icomp.i, comp.i, cycle.i)
 					}
 				}
 			}
-
-			// assign islands to inner cycles.
-			for (let comp of comps) {
-				for (let cycle of comp.cycles) {
-					if (cycle.outer)
-						continue
-					cycle.islands = []
-					for (let icomp of comp.islands) {
-						if (is_inside_cycle(icomp, cycle)) {
-							cycle.islands.push(icomp)
-							log('comp {0} is inside comp {1} cycle {2}', icomp.i, comp.i, cycle.i)
-						}
-					}
-				}
-			}
-
 		}
 
-		function hit_cycle(x, y, c) {
-			if (c.outer)
-				return
-			if (!hit_bbox(x, y, c.edges.bb))
-				return
-			for (let icomp of c.islands) {
-				for (let c1 of icomp.cycles) {
-					let c2 = hit_cycle(x, y, c1)
-					if (c2)
-						return c2
-				}
-			}
-			if (!hit_edges(x, y, c.edges))
-				return
-			return c
+	}
+
+	// hit testing ------------------------------------------------------------
+
+	function hit_edges(x, y, eps) {
+		let inside = false
+		for (let i = 0, n = eps.length, j = n-1; i < n; j = i++) {
+			let xi = ep_x(eps[i])
+			let yi = ep_y(eps[i])
+			let xj = ep_x(eps[j])
+			let yj = ep_y(eps[j])
+			let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+			if (intersect)
+				inside = !inside
 		}
-		function hit_cycles(x, y) {
-			for (let co of comps) {
-				for (let c of co.cycles) {
-					let hit_c = hit_cycle(x, y, c)
-					if (hit_c)
-						return hit_c
-				}
+		return inside
+	}
+
+	function hit_cycle(x, y, c) {
+		if (c.outer)
+			return
+		if (!hit_bbox(x, y, c.edges.bb))
+			return
+		for (let icomp of c.islands) {
+			for (let c1 of icomp.cycles) {
+				let c2 = hit_cycle(x, y, c1)
+				if (c2)
+					return c2
 			}
 		}
-		level_plan.hit_cycles = hit_cycles
+		if (!hit_edges(x, y, c.edges))
+			return
+		return c
+	}
+	function hit_cycles(x, y) {
+		for (let co of comps) {
+			for (let c of co.cycles) {
+				let hit_c = hit_cycle(x, y, c)
+				if (hit_c)
+					return hit_c
+			}
+		}
+	}
+	e.hit_cycles = hit_cycles
 
-		// plan loading & validation -------------------------------------------
+	// plan loading & validation -------------------------------------------
 
-		function extract_cycles() {
+	function extract_cycles() {
 
-			for (let c of comps)
-				c.cycles.length = 0
+		for (let c of comps)
+			c.cycles.length = 0
 
-			for (let c of comps)
-				extract_outer_cycle_for(c)
-			rebuild_adj_refs(ps)
+		for (let c of comps)
+			extract_outer_cycle_for(c, gen_id)
+		rebuild_adj_refs(ps)
 
-			for (let c of comps)
-				extract_cycles_for(c)
-			rebuild_adj_refs(ps)
+		for (let c of comps)
+			extract_cycles_for(c, gen_id)
+		rebuild_adj_refs(ps)
 
-			if (1)
-			for (let co of comps)
-				for (let c of co.cycles)
-					log('cycle {0}/{1} {2} {3} {4}: {5}', co.i, c.i,
-						is_cw(c) ? 'cw' : 'ccw',
-						c.outer ? 'outer' : '',
-						c.inside ? 'inside' : '',
-						c.map(p=>p.i).join(' ')
-					)
+		if (1)
+		for (let co of comps)
+			for (let c of co.cycles)
+				log('cycle {0}/{1} {2} {3} {4}: {5}', co.i, c.i,
+					is_cw(c) ? 'cw' : 'ccw',
+					c.outer ? 'outer' : '',
+					c.inside ? 'inside' : '',
+					c.map(p=>p.i).join(' ')
+				)
+	}
+
+	e.after_fix = noop
+	function fix() {
+		split_intersecting_segs()
+		break_overlapping_segs()
+		remove_null_segs()
+		deduplicate_points()
+		merge_colinear_segs()
+		remove_isolated_points()
+		rebuild_adj_refs(ps)
+		find_comps()
+		extract_cycles()
+		find_inside_comps()
+		e.after_fix()
+		// create_edges()
+		// e.snap_lines[0] = snap_lines_for(1)
+		// e.snap_lines[1] = snap_lines_for(0)
+	}
+	e.fix = fix
+
+	// init -------------------------------------------------------------------
+
+	function init() {
+		for (let i = 0, n = ps.length; i < n; i++)
+			init_point(ps[i], i)
+
+		let seg_i = 0
+		for (let seg of segs) {
+			seg.i = gen_id('seg')
+			for (let k = 0; k < 2; k++) {
+				let i = seg[k]
+				let p
+				if (isarray(i)) // inline point
+					p = add_point(...i)
+				else
+					p = check(ps[i], 'seg {0}/{1} invalid index {2}', seg.i, k, i)
+				seg[k] = p
+			}
+		}
+		remove_values(segs, seg => !seg[0] || !seg[1])
+
+		rebuild_seg_refs()
+		remove_angled_segs()
+		fix()
+	}
+	e.init = init
+
+	return e
+}
+
+// house model ---------------------------------------------------------------
+
+let DEFAULT_FLOOR_H = 250
+
+function house_plan(t) {
+
+	let house_plan = {floor_plans: [], floor_h: t.floor_h ?? DEFAULT_FLOOR_H}
+
+	let next_id = {}
+	function gen_id(k) {
+		if (!next_id[k])
+			next_id[k] = 1
+		else
+			next_id[k]++
+		return next_id[k]
+	}
+
+	function house_plan_bb() {
+		let bb = bbox()
+		for (let floor_plan of house_plan.floor_plans)
+			bbox_add_bbox(bb, ...floor_plan.bb)
+		return bb
+	}
+
+	function floor_plan(t, floor_i) {
+
+		let floor_plan = plan2d({ps: t.ps, segs: t.segs, gen_id: gen_id,
+			house_plan: house_plan, i: floor_i, h: t.h ?? house_plan.floor_h,
+		})
+		assert(floor_plan.h)
+		let ps = floor_plan.ps
+		let segs = floor_plan.segs
+		let comps = floor_plan.comps
+		let root_comps = floor_plan.root_comps
+		let add_point = floor_plan.add_point
+		let add_seg = floor_plan.add_seg
+		let set_seg_point = floor_plan.set_seg_point
+		let fix = floor_plan.fix
+
+		floor_plan.snap_lines = []
+
+		floor_plan.after_fix = function() {
+			create_edges()
+			floor_plan.snap_lines[0] = snap_lines_for(1)
+			floor_plan.snap_lines[1] = snap_lines_for(0)
 		}
 
 		function fix_areas_for(comp) {
@@ -1041,6 +1149,28 @@ function house_plan(t) {
 				if (0 && a1 != a0)
 					log('cycle {0} area fixed: {1} + {2} = {3}', c.i, a1, a0-a1, a0)
 			}
+		}
+
+		function edges_area(eps) {
+			let area = 0
+			for (let i = 1, n = eps.length; i <= n; i++)
+				area += ep_x(eps[mod(i, n)]) * (ep_y(eps[mod(i+1, n)]) - ep_y(eps[i-1]))
+			return area / 2
+		}
+
+		function edges_bb(eps) {
+			let bb = bbox()
+			for (let ep of eps)
+				bbox_add_point(bb, ep_x(ep), ep_y(ep))
+			return bb
+		}
+
+		function floor_plan_bb() {
+			let bb = bbox()
+			for (let co of comps) {
+				bbox_add_bbox(bb, ...co.outer_cycle.edges.bb)
+			}
+			return bb
 		}
 
 		function create_edges() {
@@ -1060,30 +1190,12 @@ function house_plan(t) {
 				fix_areas_for(c)
 
 			// compute the level plan bbox now that we have outer skins.
-			level_plan.bb = level_plan_bb()
+			floor_plan.bb = floor_plan_bb()
 
 			// recompute house plan bbox.
 			if (house_plan.bb) // not in init
 				house_plan.bb = house_plan_bb()
 
-		}
-
-		level_plan.snap_lines = []
-
-		function fix_level() {
-			split_intersecting_segs()
-			break_overlapping_segs()
-			remove_null_segs()
-			deduplicate_points()
-			merge_colinear_segs()
-			remove_isolated_points()
-			rebuild_adj_refs(ps)
-			find_comps()
-			extract_cycles()
-			find_inside_comps()
-			create_edges()
-			level_plan.snap_lines[0] = snap_lines_for(1)
-			level_plan.snap_lines[1] = snap_lines_for(0)
 		}
 
 		// plan view UI ops ----------------------------------------------------
@@ -1183,11 +1295,13 @@ function house_plan(t) {
 		function snap_lines_for(v, exclude_seg) {
 			let mi = v ? 0 : 1
 			let ms = []
-			for (let p of ps) {
-				if (exclude_seg && (exclude_seg[0] == p || exclude_seg[1] == p))
-					continue
-				let m = p[mi]
-				ms.push(m)
+			for (let plan of house_plan.floor_plans) {
+				for (let p of plan.ps) {
+					if (exclude_seg && (exclude_seg[0] == p || exclude_seg[1] == p))
+						continue
+					let m = p[mi]
+					ms.push(m)
+				}
 			}
 			ms.sort()
 			uniq_sorted(ms)
@@ -1210,13 +1324,16 @@ function house_plan(t) {
 			return ms
 		}
 
-		function snap_point(x, y, nosnap) {
+		function snap_x(x, nosnap) {
 			let snap_d = nosnap ? 2 : 20
-			let sx = level_plan.snap_lines[0].snap(x, snap_d)
-			let sy = level_plan.snap_lines[1].snap(y, snap_d)
-			return [sx, sy]
+			return floor_plan.snap_lines[0].snap(x, snap_d)
 		}
-		level_plan.snap_point = snap_point
+		function snap_y(y, nosnap) {
+			let snap_d = nosnap ? 2 : 20
+			return floor_plan.snap_lines[1].snap(y, snap_d)
+		}
+		floor_plan.snap_x = snap_x
+		floor_plan.snap_y = snap_y
 
 		function seg_move_bump_limit(seg, sign) {
 			let v = is_v(seg)
@@ -1333,11 +1450,6 @@ function house_plan(t) {
 			// find all affected _|_ edges so we can show their lengths as we move the seg
 			{
 			let perp_edges = []
-			function is_edge_v(ep1, ep2) {
-				let x1 = ep_x(ep1)
-				let x2 = ep_x(ep2)
-				return near(x1, x2)
-			}
 			// find the farthest edge point from `c.edges[i0]` going in `dir` direction
 			// in the array, which has the same spatial direction `v` with the previous point.
 			function last_perp_edge_point(c, i, n, dir, v) {
@@ -1347,7 +1459,7 @@ function house_plan(t) {
 					let ep2 = c.edges[mod(i+dir, n)]
 					if (ep2.p == ep0.p) // end-cap, don't measure
 						return
-					if (is_edge_v(ep1, ep2) != v) // changed direction, return last edge point
+					if (edge_is_v(ep1, ep2) != v) // changed direction, return last edge point
 						return ep1
 					i += dir
 				}
@@ -1426,9 +1538,11 @@ function house_plan(t) {
 
 			}
 
-			s.stop = function(draw_state) {
+			s.stop = function(draw_state, remove_seg) {
 				push_log()
-				fix_level()
+				if (remove_seg)
+					rem_seg(seg)
+				fix()
 				pop_log('STOP MOVE SEG: {0}', seg.i)
 				pr_log()
 				draw_state.snap_lines.length = 0
@@ -1437,7 +1551,7 @@ function house_plan(t) {
 
 			return s
 		}
-		level_plan.start_move_seg = start_move_seg
+		floor_plan.start_move_seg = start_move_seg
 
 		function start_resize_seg(p, mx0, my0, dx, dy, sdx, sdy, draw_state) {
 
@@ -1482,7 +1596,7 @@ function house_plan(t) {
 
 			let p0 = [...p]
 
-			fix_level()
+			fix()
 
 			pop_log('START RESIZE SEG: {0}', seg.i)
 			pr_log()
@@ -1492,7 +1606,7 @@ function house_plan(t) {
 
 			let s = {seg: seg}
 
-			s.resize = function(dx, dy, draw_state) {
+			s.resize = function(dx, dy, draw_state, hs) {
 				let x1 = p0[0] + dx * abs(sdx)
 				let y1 = p0[1] + dy * abs(sdy)
 
@@ -1506,12 +1620,14 @@ function house_plan(t) {
 					y1 = a
 				p[0] = x1
 				p[1] = y1
+				hs.set('x', x1)
+				hs.set('y', y1)
 				create_edges()
 			}
 
 			s.stop = function(draw_state) {
 				push_log()
-				fix_level()
+				fix()
 				pop_log('STOP RESIZE SEG: {0}', seg.i)
 				pr_log()
 				draw_state.snap_lines.length = 0
@@ -1520,61 +1636,212 @@ function house_plan(t) {
 
 			return s
 		}
-		level_plan.start_resize_seg = start_resize_seg
+		floor_plan.start_resize_seg = start_resize_seg
 
-		// init level_plan -----------------------------------------------------
+		// init floor_plan -----------------------------------------------------
 
 		push_log()
+		floor_plan.init()
+		pop_log('LEVEL LOADED {0}', floor_plan.i)
 
-		for (let i = 0, n = ps.length; i < n; i++)
-			init_point(ps[i], i)
+		return floor_plan
+	}
 
-		let seg_i = 0
-		for (let seg of segs) {
-			seg.i = seg_i++
-			for (let k = 0; k < 2; k++) {
-				let i = seg[k]
-				let p
-				if (isarray(i)) // inline point
-					p = add_point(...i)
-				else
-					p = check(ps[i], 'seg {0}/{1} invalid index {2}', seg.i, k, i)
-				seg[k] = p
-			}
+	// face view --------------------------------------------------------------
+
+	function face_view(face) {
+
+		let fv = face_is_v(face)
+		let fs = face_sign(face)
+
+		let face_view = {house_plan: house_plan, i: face}
+
+		let ep_m    = fv ? ep_y : ep_x
+		let ep_axis = fv ? ep_x : ep_y
+
+		function edge_sign(ep1, ep2) {
+			return ep_m(ep1) < ep_m(ep2) ? 1 : -1
 		}
-		remove_values(segs, seg => !seg[0] || !seg[1])
 
-		rebuild_seg_refs()
-		remove_angled_segs()
-		fix_level()
+		let walls = [] // exterior wall horizontal measurements
+		let plans = []
 
-		pop_log('LEVEL LOADED {0}', level.i)
+		function create_face_plans() {
 
-		return level_plan
+			walls.length = 0
+			plans.length = 0
+
+			let min_floor =  1/0
+			let max_floor = -1/0
+
+			// find outer edges that are projecting in the face's direction.
+			for (let floor_plan of house_plan.floor_plans) {
+				for (let comp of floor_plan.comps) {
+					if (comp.inside)
+						continue
+					let eps = comp.outer_cycle.edges
+					for (let i = 0, n = eps.length; i <= n; i++) {
+						let ep1 = eps[mod(i  , n)]
+						let ep2 = eps[mod(i+1, n)]
+						if (edge_is_v(ep1, ep2) != fv) // _|_ edge: invisible
+							continue
+						if (edge_sign(ep1, ep2) != fs) // back-face edge: obscured: cull it
+							continue
+
+						if (fs == -1) // normalize seg direction to aid merging.
+							;[ep2, ep1] = [ep1, ep2]
+
+						walls.push([ep1, ep2, floor_plan, comp])
+
+						min_floor = min(min_floor, floor_plan.i)
+						max_floor = max(max_floor, floor_plan.i)
+					}
+				}
+			}
+
+			// sort walls by depth.
+			walls.sort(function(w1, w2) {
+				// 1st level grouping: by depth (asc order).
+				let y1 = ep_axis(w1[0])
+				let y2 = ep_axis(w2[0])
+				let dy = fs * (y1 - y2)
+				if (dy) return dy
+				// 2nd level grouping: by floor (desc order).
+				let l1 = w1[2].i
+				let l2 = w2[2].i
+				return l2 - l1
+			})
+
+			let eq_depth = (w1, w2) => ep_axis(w1[0]) == ep_axis(w2[0])
+			let eq_floor = (w1, w2) => w1[2] == w2[2]
+
+			// create face polygons by merging the faces that are on the same vertical plane.
+			for (let [j1, j2] of group_sorted(walls, eq_depth)) {
+
+				// 1st level grouping: j1,j2 is all walls of a single depth plane.
+
+				let segs = []
+				let y = 0
+
+				function add_seg(x1, y1, x2, y2, ep1, ep2) {
+					let p1 = [x1, y1]
+					let p2 = [x2, y1]
+					let seg = [p1, p2]
+					segs.push(seg)
+					// set back refs to origin eps for quick updating
+					p1.ep1 = ep1
+					p2.ep2 = ep2
+				}
+
+				let last_i1, last_i2
+				for (let [i1, i2] of group_sorted(walls, eq_floor, j1, j2)) {
+
+					// 2nd level grouping: i1,i2 is all walls of a single floor of this depth plane.
+
+					let floor_plan = walls[i1][2]
+					let floor = floor_plan.i
+					let h = floor_plan.h
+					let y1 = y
+					let y2 = y + h
+
+					for (let i = i1; i < i2; i++) {
+
+						// make vertical segments
+						let [ep1, ep2] = walls[i]
+						let x1 = ep_m(ep1)
+						let x2 = ep_m(ep2)
+						add_seg(x1, y1, x2, y2, ep1, ep2)
+
+						// for top and bottom floors, make top and bottom segments too.
+						if (floor == min_floor || floor == max_floor) {
+							let y = floor == min_floor ? y2 : y1
+							add_seg(x1, y, x2, y, ep1, ep2)
+						}
+					}
+
+					// merge segments between this floor and the last floor.
+					// adding all end-points from the segments of both floors
+					// and sorting them gives us exactly the segments we want,
+					// no analyzing intersections necessary.
+					if (last_i1 != null) {
+
+						let a = []
+
+						for (let i = i1; i < i2; i++)
+							a.push(walls[i][0], walls[i][1])
+						for (let i = last_i1; i < last_i2; i++)
+							a.push(walls[i][0], walls[i][1])
+
+						a.sort((ep1, ep2) => ep_m(ep1) - ep_m(ep2))
+
+						for (let i = 0, n = a.length; i < n; i += 2) {
+							let ep1 = a[i]
+							let ep2 = a[i+1]
+							let x1 = ep_m(ep1)
+							let x2 = ep_m(ep2)
+							if (x1 != x2)
+								add_seg(x1, y2, x2, y2, ep1, ep2)
+						}
+
+					}
+
+					y += h
+					last_i1 = i1
+					last_i2 = i2
+				}
+
+				let plan = plan2d({segs: segs, gen_id: gen_id})
+				push_log()
+				plan.init()
+				pop_log('FACE PLAN {0}/{1} {2} {3}..{4}', face, plans.length, ep_axis(walls[j1][0]), j1, j2)
+				plans.push(plan)
+
+
+			}
+
+		}
+
+		function wall_face_rect(plan, lv, wr, i, scale) {
+			let h = pix(lv.h, scale)
+			let v  = wall_vert(wr, i)
+			let p1 = wall_p1(wr, i+0, true, null, scale)
+			let p2 = wall_p1(wr, i+1, true, null, scale)
+			let X = v ? 1 : 0
+			let Y = v ? 0 : 1
+			let x1 = p1[X]
+			let x2 = p2[X]
+			let x = min(x1, x2)
+			let w = max(x1, x2) - x
+			let y = 0
+			return [x, y, w, h, p1[Y]] // (x, y, w, h, z)
+		}
+
+		create_face_plans()
+
+		return face_view
 	}
 
-	house_plan.level_plan = level_plan
-
-	// face view UI ops ----------------------------------------------------
-
-	function face_bb(plan, vert) { // returns (x1, y1, x2, y2, min_depth, max_depth)
-		let [x1, y1, x2, y2] = level_plan_bb(plan)
+	function face_bb(vert) { // returns (x1, y1, x2, y2, min_depth, max_depth)
+		let [x1, y1, x2, y2] = house_plan.bb
 		let h = 0
-		for (let lv of plan.levels)
-			h += lv.h
+		for (let floor_plan of house_plan.floor_plans)
+			h += floor_plan.h
 		if (vert)
-			return [y1, 0, y2, h, x1, x2]
+			return [y1, 0, y2, h]
 		else
-			return [x1, 0, x2, h, y1, y2]
+			return [x1, 0, x2, h]
 	}
+	house_plan.face_bb = face_bb
 
 	// init house_plan --------------------------------------------------------
 
 	push_log()
 
-	let i = 0
-	for (let level of house_plan.levels)
-		level.i = i++
+	for (let i = 0, n = t.floors.length; i < n; i++)
+		house_plan.floor_plans[i] = floor_plan(t.floors[i], i)
+
+	for (let i = 1; i <= 4; i++)
+		house_plan.face_views = face_view(i)
 
 	house_plan.bb = house_plan_bb()
 
@@ -1599,17 +1866,30 @@ function scaler() {
 	s.plan_d = d => d / scale
 	s.ep_x = e => s.x(e.p[0]) + s.d(e[0])
 	s.ep_y = e => s.y(e.p[1]) + s.d(e[1])
+	s.transform = function(cx, w, h) {
+		if (s.rotation) {
+			let xc = round(w / 2)
+			let yc = round(h / 2)
+			cx.translate(xc, yc)
+			cx.rotate(s.rotation)
+			cx.translate(-xc, -yc)
+		}
+		cx.translate(s.x0, s.y0)
+	}
 	function set_scale(sc) {
 		scale = sc
 		s.scale = sc
 		// snap line width to an even number for sharpness
 		s.line_width = snap(line_width * sc, 2)
 	}
-	s.scale_to_fit = function(bb, w, h) {
+	let bb = bbox()
+	s.scale_to_fit = function(bb1, w, h) {
 		if (s.zoomed) return
 		let margin = ceil(ui.em(2) + line_width)
 		w -= 2 * margin
 		h -= 2 * margin
+		array_set(bb, bb1)
+		bbox_rotate(bb, s.rotation)
 		let [x1, y1, x2, y2] = bb
 		let bw = x2 - x1
 		let bh = y2 - y1
@@ -1637,6 +1917,8 @@ function scaler() {
 		let plan_yt = s.plan_y(-s.y0 + yc)
 
 		set_scale(clamp(abs(scale * (d < 0 ? 1 / d : d)), 0.1, 10))
+
+		// TODO: rotate
 
 		let xt = s.x(plan_xt)
 		let yt = s.y(plan_yt)
@@ -1690,14 +1972,67 @@ function draw_edges(cx, sg, eps) {
 	cx.closePath()
 }
 
+function draw_walls(cx, sg, comps, segs) {
+	for (let comp of comps) {
+
+		cx.beginPath()
+
+		for (let c of comp.cycles) {
+			if (!c.edges)
+				continue
+			draw_edges(cx, sg, c.edges)
+		}
+
+		if (!cx.wall_pattern) {
+			let w = 100
+			let c = new OffscreenCanvas(w, w)
+			let x = c.getContext('2d')
+			let g = x.createLinearGradient(0, 0, w, 2*w)
+			for (let i = 0, n = 2*w; i <= n; i += 4) {
+				g.addColorStop(clamp((i - 1) / n, 0, 1), 'white')
+				g.addColorStop(clamp((i + 0) / n, 0, 1), 'gray')
+				g.addColorStop(clamp((i + 1) / n, 0, 1), 'white')
+			}
+			x.rect(0, 0, w, w)
+			x.fillStyle = g
+			x.fill()
+			cx.wall_pattern = cx.createPattern(c, 'repeat')
+		}
+		if (sg.scale > 0.4) {
+			cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
+			cx.fill('nonzero')
+			cx.lineWidth = DEBUG_PLAN ? 2 : sg.line_width
+			cx.strokeStyle = 'black' //ui.fg_color('text')
+			cx.lineJoin = 'round'
+			cx.stroke()
+			cx.lineJoin = 'miter'
+			cx.lineWidth = 1
+		} else if (sg.scale > 0.2) { // too small to stroke
+			cx.fillStyle = ui.fg_color('text')
+			cx.fill()
+		} else { // to small to even show edges
+			for (let seg of segs) {
+				let x1 = sg.x(seg[0][0]) + .5
+				let y1 = sg.y(seg[0][1]) + .5
+				let x2 = sg.x(seg[1][0]) + .5
+				let y2 = sg.y(seg[1][1]) + .5
+				cx.beginPath()
+				cx.moveTo(x1, y1)
+				cx.lineTo(x2, y2)
+				cx.strokeStyle = ui.fg_color('text')
+				cx.stroke()
+			}
+		}
+	}
+}
+
 // evaluate a line at time t using linear interpolation.
 // the time between 0..1 covers the segment interval.
-function point_on_line(t, x1, y1, x2, y2, out) {
+function point_on_line(t, x1, y1, x2, y2) {
 	out[0] = x1 + t * (x2 - x1)
 	out[1] = y1 + t * (y2 - y1)
 	return out
 }
-let out = []
 function draw_length(cx, sg, x1, y1, x2, y2) {
 
 	let d = distance(x1, y1, x2, y2)
@@ -1740,9 +2075,9 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.beginPath()
 
 	// left arrow
-	let [x1a1, y1a1] = point_around(x1, y1, 8, a + 45*rad, out)
-	let [x1a2, y1a2] = point_around(x1, y1, 8, a - 45*rad, out)
-	let [x1e, y1e] = point_on_line(t1, x1, y1, x2, y2, out)
+	let [x1a1, y1a1] = point_around(x1, y1, 8, a + 45*rad)
+	let [x1a2, y1a2] = point_around(x1, y1, 8, a - 45*rad)
+	let [x1e, y1e] = point_on_line(t1, x1, y1, x2, y2)
 
 	cx.moveTo(x1  , y1)
 	cx.lineTo(x1a1, y1a1)
@@ -1752,9 +2087,9 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.lineTo(x1e , y1e)
 
 	// right arrow
-	let [x2a1, y2a1] = point_around(x2, y2, 8, a + (90+45)*rad, out)
-	let [x2a2, y2a2] = point_around(x2, y2, 8, a - (90+45)*rad, out)
-	let [x2e, y2e] = point_on_line(t2, x1, y1, x2, y2, out)
+	let [x2a1, y2a1] = point_around(x2, y2, 8, a + (90+45)*rad)
+	let [x2a2, y2a2] = point_around(x2, y2, 8, a - (90+45)*rad)
+	let [x2e, y2e] = point_on_line(t2, x1, y1, x2, y2)
 	cx.moveTo(x2  , y2)
 	cx.lineTo(x2a1, y2a1)
 	cx.moveTo(x2  , y2)
@@ -1765,7 +2100,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.strokeStyle = ui.fg_color('text')
 	cx.stroke()
 
-	let [xc, yc] = point_on_line(.5, x1, y1, x2, y2, out)
+	let [xc, yc] = point_on_line(.5, x1, y1, x2, y2)
 	cx.translate(xc, yc)
 	cx.rotate(a)
 	let tx = round(-w / 2)
@@ -1787,7 +2122,7 @@ ui.box_widget('plan_view', {
 		let s = ui.state(id)
 		let draw_state = s.get('draw_state')
 		if (!draw_state) {
-			draw_state = {snap_lines: [], measure_edges: []}
+			draw_state = {snap_lines: [], measure_edges: [], above_floors: [], below_floors: []}
 			s.set('draw_state', draw_state)
 		}
 		s.set('plan', plan)
@@ -1842,7 +2177,7 @@ ui.box_widget('plan_view', {
 				cs.get('move_seg').move(dx, dy, draw_state)
 
 			if (action == 'resize_seg')
-				cs.get('resize_seg').resize(dx, dy, draw_state)
+				cs.get('resize_seg').resize(dx, dy, draw_state, hs)
 
 			if (action == 'pan') {
 				sg.x0 = sg.pan_x0 + sg.d(dx)
@@ -1852,7 +2187,7 @@ ui.box_widget('plan_view', {
 
 			if (dstate == 'drop') {
 				if (action == 'move_seg') {
-					cs.get('move_seg').stop(draw_state)
+					cs.get('move_seg').stop(draw_state, ui.dblclick)
 				} else if (action == 'resize_seg') {
 					cs.get('resize_seg').stop(draw_state)
 				}
@@ -1867,34 +2202,66 @@ ui.box_widget('plan_view', {
 				)
 
 			ui.m(ui.sp())
-			ui.h(0, ui.sp05(), 's', 't')
+			ui.v(1, ui.sp())
 
-				if (!ui.window_focused) {
-					ui.p(ui.sp05(), 0)
-					ui.stack('', 0)
-						ui.font('far')
-						ui.fs(ui.xlarge())
-						ui.color('text')
-						ui.text('', '\uf11c', 0, 'c', 'c')
-						ui.polyline('', '0 5  35 20', 1, null, null, 'text', null, 2)
-					ui.end_stack()
-				}
+				ui.h(0, ui.sp05(), 's', 't')
 
-				ui.v(1); ui.end()
+					ui.bold()
+					ui.text('', floor_names[plan.i] ?? S(plan.i+'_floor', '{0}ᵗʰ FLOOR', plan.i))
 
-				if (sg.zoomed) {
-					if (ui.icon_button(id+'.zoom_button', 'fas', sg.scale > 1 ? '\uf00e' : '\uf010', 0, ']')) {
-						sg.reset_zoom()
-						ui.redraw()
+					if (!ui.window_focused) {
+						ui.p(ui.sp05(), 0)
+						ui.stack('', 0, '[')
+							ui.font('far')
+							ui.nobold()
+							ui.xlarge()
+							ui.color('text')
+							ui.text('', '\uf11c', 0, 'c', 'c')
+							ui.polyline('', '0 5  35 20', 1, null, null, 'text', null, 2)
+						ui.end_stack()
 					}
-				}
 
-				if (ui.icon_button(id+'.grid_button', 'fas', '\uf00a', 0)) {
-					sg.show_grid = !sg.show_grid
-					ui.animate()
-				}
+					ui.v(1); ui.end()
 
-			ui.end_h()
+					if (sg.zoomed) {
+						if (ui.icon_button(id+'.zoom_button', 'fas', sg.scale > 1 ? '\uf00e' : '\uf010', 0, ']')) {
+							sg.reset_zoom()
+							ui.redraw()
+						}
+					}
+
+					if (ui.icon_button(id+'.rotate_button', 'fas', '\uf2f1', 0)) {
+						sg.rotation = ((sg.rotation ?? 0) + 90*rad) % (360*rad)
+						ui.animate()
+					}
+
+					if (ui.icon_button(id+'.grid_button', 'fas', '\uf00a', 0)) {
+						sg.show_grid = !sg.show_grid
+						ui.animate()
+					}
+
+				ui.end_h()
+
+				ui.button_stack('', 0, ']')
+				ui.button_bb()
+
+					ui.v(0, ui.sp())
+
+						{
+						let state = ui.button_state(id+'.c1')
+						ui.button_icon('fas', '\uf245', state)
+						}
+
+						{
+						let state = ui.button_state(id+'.c2')
+						ui.button_icon('fas', '\uf0b2', state)
+						}
+
+					ui.end_v()
+
+				ui.end_button_stack()
+
+			ui.end_v()
 
 		ui.end_stack()
 
@@ -1925,6 +2292,7 @@ ui.box_widget('plan_view', {
 		draw_state.x0 = sg.x0
 		draw_state.y0 = sg.y0
 		draw_state.scale = sg.scale
+		draw_state.rotation = sg.rotation
 
 		// pick what parts of the plan to send over the network for drawing
 		// and in which format. note that the plan has arrays with props but
@@ -1933,6 +2301,17 @@ ui.box_widget('plan_view', {
 		draw_state.segs = plan.segs // TODO: remove this from draw stream
 		draw_state.ps = plan.ps // TODO: remove this from draw stream
 		draw_state.plan_snap_lines = plan.snap_lines
+
+		draw_state.above_floors.length = 0
+		draw_state.below_floors.length = 0
+		for (let plan1 of plan.house_plan.floor_plans) {
+			if (plan1 == plan)
+				continue
+			let t = {comps: plan1.comps, segs: plan1.segs}
+			let a = plan1.i > plan.i ? draw_state.above_floors : draw_state.below_floors
+			a.push(t)
+		}
+
 	},
 
 	draw: function(a, i) {
@@ -1950,9 +2329,18 @@ ui.box_widget('plan_view', {
 
 		let hs = ui.hit(id)
 		let cs = ui.captured(id)
+		let hit_action  = hs?.get('action')
+		let hit_seg     = hs?.get('seg')
+		let hit_p       = hs?.get('p')
+		let hit_cycle   = hs?.get('cycle')
+		let hit_x       = hs?.get('x')
+		let hit_y       = hs?.get('y')
+		let drag_action = cs?.get('action')
+		let drag_seg    = cs?.get('seg')
 
 		let sg = scale_group('editor')
 		sg.set_scale(draw_state.scale)
+		sg.rotation = draw_state.rotation
 
 		let cx = ui.cx
 		cx.save()
@@ -2006,14 +2394,17 @@ ui.box_widget('plan_view', {
 		{
 		let m = ui.em()
 		cx.fillStyle = ui.fg_color('label')
-		let action = cs?.get('action')
-		let s = (action == 'move_seg' || action == 'resize_seg')
-			? 'SHIFT = No Snap'
-			: 'SHIFT = Pan'
+		let s = 'CTRL=No Snap  SHIFT=Pan'
 		cx.fillText(s, m, h - m)
 		}
 
-		cx.translate(x0, y0)
+		sg.transform(cx, w, h)
+
+		// below floors
+		cx.globalAlpha = .1
+		for (let plan1 of draw_state.below_floors)
+			draw_walls(cx, sg, plan1.comps, plan1.segs)
+		cx.globalAlpha = 1
 
 		// snap lines
 		cx.setLineDash([5, 8])
@@ -2056,63 +2447,19 @@ ui.box_widget('plan_view', {
 				for (let icomp of c.islands)
 					draw_edges(cx, sg, icomp.outer_cycle.edges)
 
-				cx.fillStyle = ui.alpha_adjust(ui.bg_color_hsl('bg1', hs?.get('cycle') == c ? 'hover' : null), .5)
+				cx.fillStyle = ui.alpha_adjust(ui.bg_color_hsl('bg1', hit_cycle == c ? 'hover' : null), .5)
 				cx.fill()
 			}
 		}
 
-		// walls
-		for (let comp of draw_state.comps) {
+		// walls of this floor
+		draw_walls(cx, sg, draw_state.comps, draw_state.segs)
 
-			cx.beginPath()
-
-			for (let c of comp.cycles) {
-				if (!c.edges)
-					continue
-				draw_edges(cx, sg, c.edges)
-			}
-
-			if (!cx.wall_pattern) {
-				let w = 100
-				let c = new OffscreenCanvas(w, w)
-				let x = c.getContext('2d')
-				let g = x.createLinearGradient(0, 0, w, 2*w)
-				for (let i = 0, n = 2*w; i <= n; i += 4) {
-					g.addColorStop(clamp((i - 1) / n, 0, 1), 'white')
-					g.addColorStop(clamp((i + 0) / n, 0, 1), 'gray')
-					g.addColorStop(clamp((i + 1) / n, 0, 1), 'white')
-				}
-				x.rect(0, 0, w, w)
-				x.fillStyle = g
-				x.fill()
-				cx.wall_pattern = cx.createPattern(c, 'repeat')
-			}
-			if (sg.scale > 0.4) {
-				cx.fillStyle = DEBUG_PLAN ? '#333' : cx.wall_pattern
-				cx.fill('nonzero')
-				cx.lineWidth = DEBUG_PLAN ? 2 : sg.line_width
-				cx.strokeStyle = 'black' //ui.fg_color('text')
-				cx.lineJoin = 'round'
-				cx.stroke()
-				cx.lineJoin = 'miter'
-				cx.lineWidth = 1
-			} else if (sg.scale > 0.2) { // too small to stroke
-				cx.fillStyle = ui.fg_color('text')
-				cx.fill()
-			} else { // to small to even show edges
-				for (let seg of draw_state.segs) {
-					let x1 = sg.x(seg[0][0]) + .5
-					let y1 = sg.y(seg[0][1]) + .5
-					let x2 = sg.x(seg[1][0]) + .5
-					let y2 = sg.y(seg[1][1]) + .5
-					cx.beginPath()
-					cx.moveTo(x1, y1)
-					cx.lineTo(x2, y2)
-					cx.strokeStyle = ui.fg_color('text')
-					cx.stroke()
-				}
-			}
-		}
+		// walls of above floor
+		cx.globalAlpha = .1
+		for (let plan1 of draw_state.above_floors)
+			draw_walls(cx, sg, plan1.comps, plan1.segs)
+		cx.globalAlpha = 1
 
 		// cycles area
 		if (sg.scale > 0.4)
@@ -2130,22 +2477,6 @@ ui.box_widget('plan_view', {
 				}
 			}
 
-		// hit seg
-		let hit_seg    = hs?.get('seg')
-		let hit_action = hs?.get('action')
-		if (hit_seg && !hit_action) {
-			let x = sg.x(hs.get('x'))
-			let y = sg.y(hs.get('y'))
-			cx.beginPath()
-			cx.arc(x, y, 3, 0, 2*PI)
-			cx.strokeStyle = 'black'
-			cx.lineWidth = 3
-			cx.stroke()
-			cx.lineWidth = 1
-			cx.fillStyle = 'white'
-			cx.fill()
-		}
-
 		// edge measurements
 		let me = draw_state.measure_edges
 		if (me) {
@@ -2160,10 +2491,9 @@ ui.box_widget('plan_view', {
 		}
 
 		// hit point
-		let hit_p = hs?.get('p')
-		if (hit_p) {
-			let x = sg.x(hit_p[0])
-			let y = sg.y(hit_p[1])
+		if (hit_x != null && hit_y != null) {
+			let x = sg.x(hit_x)
+			let y = sg.y(hit_y)
 			cx.beginPath()
 			cx.arc(x, y, 3, 0, 2*PI)
 			cx.strokeStyle = 'black'
@@ -2195,16 +2525,15 @@ ui.box_widget('plan_view', {
 		}
 
 		// cursor
-		let action = cs?.get('action')
-		let seg = action == 'move_seg' && cs.get('seg') || (hit_action == 'move_seg' && hs?.get('seg'))
+		let seg = drag_action == 'move_seg' && drag_seg || (hit_action == 'move_seg' && hit_seg)
 		if (seg) {
 			if (seg[0].segs.length == 1 && seg[1].segs.length == 1)
 				ui.set_cursor('move')
 			else
 				ui.set_cursor(is_v(seg) ? 'ew-resize' : 'ns-resize')
-		} else if (hs?.get('p'))
-			ui.set_cursor(hs.get('p_seg') ? 'alias' : 'copy')
-		else if (action == 'pan')
+		} else if (hit_p)
+			ui.set_cursor('copy')
+		else if (drag_action == 'pan')
 			ui.set_cursor('grabbing')
 		else if (hs) {
 			if (hit_action == 'pan')
@@ -2264,6 +2593,14 @@ ui.box_widget('plan_view', {
 		cx.restore()
 	},
 
+	/*	sets in hovers(id):
+		action=pan                 shift pressed, pan, don't hit anything
+		p                          hit joint
+		seg, action=move_seg       hit segment
+		seg, x or y                hit around segment along its length
+		x and/or y                 hit vert and/or horiz snap line
+		cycle                      inside inner cycle
+	*/
 	hit: function(a, i) {
 
 		let x00 = a[i+0]
@@ -2273,7 +2610,7 @@ ui.box_widget('plan_view', {
 		let id  = a[i+PLAN_VIEW_ID]
 		let draw_state = a[i+PLAN_VIEW_DRAW_STATE]
 
-		if (ui.captured_id != null)
+		if (ui.captured_id != null && !ui.clickup)
 			return
 
 		if (!ui.hit_box(a, i))
@@ -2290,14 +2627,15 @@ ui.box_widget('plan_view', {
 
 		let cx = ui.cx
 
-		let nosnap = ui.key('shift')
+		let pan    = ui.key('shift')
+		let nosnap = ui.key('control')
 
 		sg.zoom(ui.wheel_dy,
 			ui.mx - x00,
 			ui.my - y00
 		)
 
-		if (nosnap) {
+		if (pan) {
 			hs.set('action', 'pan')
 			return
 		}
@@ -2306,12 +2644,16 @@ ui.box_widget('plan_view', {
 
 		cx.save()
 		cx.translate(x00, y00)
-		cx.translate(draw_state.x0, draw_state.y0)
+		sg.transform(cx, w, h)
 		ui.update_mouse()
+
+		let mx = sg.plan_x(ui.mx)
+		let my = sg.plan_y(ui.my)
 
 		let snap_margin = 15
 
-		let hit_p
+		let hit_p, hit_seg, hit_action, hit_cycle
+
 		for (let p of draw_state.ps) {
 			let dx = ui.mx - sg.x(p[0])
 			let dy = ui.my - sg.y(p[1])
@@ -2319,12 +2661,13 @@ ui.box_widget('plan_view', {
 			if (abs(dx) <= snap_d && abs(dy) <= snap_d) {
 				hit_p = p
 				hs.set('p', p) // point to start new seg from
+				hs.set('x', p[0])
+				hs.set('y', p[1])
 				sl.push(p[0], 1, p[1], 0)
 				break
 			}
 		}
 
-		let hit_seg
 		if (!hit_p)
 			for (let seg of draw_state.segs) {
 
@@ -2355,8 +2698,9 @@ ui.box_widget('plan_view', {
 				}
 				if (ui.hit_bb(sx1, sy1, sx2, sy2)) {
 					hit_seg = seg
+					hit_action = 'move_seg'
 					hs.set('seg', seg)
-					hs.set('action', 'move_seg')
+					hs.set('action', hit_action)
 					break
 				}
 
@@ -2371,8 +2715,8 @@ ui.box_widget('plan_view', {
 				if (ui.hit_bb(sx1, sy1, sx2, sy2)) {
 					hit_seg = seg
 					hs.set('seg', seg)
-					let sx = !v ? sg.plan_x(ui.mx) : null
-					let sy = v  ? sg.plan_y(ui.my) : null
+					let sx = !v ? plan.snap_x(mx, nosnap) ?? mx : null
+					let sy = v  ? plan.snap_y(my, nosnap) ?? my : null
 					hs.set('x', sx ?? x1)
 					hs.set('y', sy ?? y1)
 					if (sx != null) sl.push(sx, 1)
@@ -2382,24 +2726,21 @@ ui.box_widget('plan_view', {
 
 			}
 
+		// hit snapping point
 		if (!hit_p && !hit_seg) {
-
-			let x = sg.plan_x(ui.mx)
-			let y = sg.plan_y(ui.my)
-
-			// hit snapping point
-			let [sx, sy] = plan.snap_point(x, y, nosnap)
-			hs.set('x', sx ?? x)
-			hs.set('y', sy ?? y)
+			let sx = plan.snap_x(mx, nosnap)
+			let sy = plan.snap_y(my, nosnap)
+			hs.set('x', sx ?? mx)
+			hs.set('y', sy ?? my)
 			if (sx != null) sl.push(sx, 1)
 			if (sy != null) sl.push(sy, 0)
+		}
 
-			// hit inner cycle
-			let hit_cycle = plan.hit_cycles(x, y)
-			if (hit_cycle) {
-				hs.set('comp' , hit_cycle.comp)
+		// hit inner cycle
+		if (!hit_p && !hit_seg) {
+			hit_cycle = plan.hit_cycles(mx, my)
+			if (hit_cycle)
 				hs.set('cycle', hit_cycle)
-			}
 		}
 
 		cx.restore()
@@ -2417,14 +2758,44 @@ let FACE_VIEW_FACE = ui.S+1
 
 ui.box_widget('face_view', {
 
-	create: function(cmd, id, plan, face, fr, align, valign, min_w, min_h) {
+	create: function(cmd, id, house_plan, face, fr, align, valign, min_w, min_h) {
+
+		let s = ui.state(id)
+		let draw_state = s.get('draw_state')
+		if (!draw_state) {
+			draw_state = {snap_lines: [], measure_edges: []}
+			s.set('draw_state', draw_state)
+		}
+		s.set('house_plan', house_plan)
 
 		let [dstate, dx, dy] = ui.drag(id)
 
+		let sg = scale_group('editor')
+
+		dx /= sg.scale
+		dy /= sg.scale
+
 		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
-				id, plan, face
+				id, house_plan, face
 			)
 	},
+
+	/*
+	after_position: function(a, i, axis)	{
+		let sg = scale_group('editor')
+		if (!axis) {
+			sg.set_scale(1/0)
+			return
+		}
+		let w    = a[i+2]
+		let h    = a[i+3]
+		let id   = a[i+FACE_VIEW_ID]
+		let face = a[i+FACE_VIEW_FACE]
+		let house_plan = ui.state(id).get('house_plan')
+		let v = face_is_v(face)
+		sg.scale_to_fit(house_plan.face_bb(v), w, h)
+	},
+	*/
 
 	draw: function(a, i) {
 
@@ -2436,13 +2807,11 @@ ui.box_widget('face_view', {
 		let plan = a[i+FACE_VIEW_PLAN]
 		let face = a[i+FACE_VIEW_FACE]
 
-		return
-
 		// face is 1,2,3,4 going clockwise from the left-to-right face.
-		let face_vert = (face-1) & 1
+		let v = face_is_v(face)
 		let face_sign = face <= 2 ? 1 : -1
 
-		let [scale, face_x, face_y, min_depth, max_depth] = face_scale(plan, face_vert, w, h)
+		return
 
 		let hs = ui.hit(id)
 
@@ -2455,19 +2824,19 @@ ui.box_widget('face_view', {
 		cx.translate(x00, y00)
 		cx.translate(-face_x, -face_y)
 
-		let walls = sort_face_walls(plan, face_vert, face_sign)
+		let walls = sort_face_walls(plan, face)
 
-		for (let level_num = plan.levels.length-1; level_num >= 0; level_num--) {
+		for (let floor_num = plan.floors.length-1; floor_num >= 0; floor_num--) {
 
-			let lv = plan.levels[level_num]
+			let lv = plan.floors[floor_num]
 			let h = pix(lv.h, scale)
 
 			// draw walls (offset face) in depth order.
-			let X = face_vert ? 1 : 0
-			let Y = face_vert ? 0 : 1
+			let X = v ? 1 : 0
+			let Y = v ? 0 : 1
 			for (let [wr, i] of walls) {
 
-				if ((wr.level ?? 0) != level_num)
+				if ((wr.floor ?? 0) != floor_num)
 					continue
 
 				let [x, y, w, h, z] = wall_face_rect(plan, lv, wr, i, scale)
@@ -2551,11 +2920,11 @@ ui.box_widget('face_view', {
 			walls.reverse()
 
 			let y = 0
-			for (let level_num = plan.levels.length-1; level_num >= 0; level_num--) {
+			for (let floor_num = plan.floors.length-1; floor_num >= 0; floor_num--) {
 
-				let lv = plan.levels[level_num]
+				let lv = plan.floors[floor_num]
 
-				if (hit_face(plan, lv, level_num, walls, id, scale, true))
+				if (hit_face(plan, lv, floor_num, walls, id, scale, true))
 					break
 
 				y += pix(lv.h, scale)
@@ -2576,7 +2945,8 @@ ui.box_widget('face_view', {
 
 G.test_plan = house_plan({
 
-	levels: [
+	floor_h: 250,
+	floors: [
 		{
 			segs: [
 				// outside rect
@@ -2615,7 +2985,7 @@ G.test_plan = house_plan({
 		},
 		{
 			segs: [
-				[[100,300],[400,300]],
+				[[100,300],[600,300]],
 				[[100,300],[100,100]],
 
 				// island for testing inside check
@@ -2664,28 +3034,28 @@ ui.main = function() {
 
 		ui.h()
 
-			for (let i = test_plan.levels.length-1; i >= 0; i--) {
+			for (let floor_plan of test_plan.floor_plans) {
+
+			//for (let i = test_plan.floor_plans.length-1; i >= 0; i--) {
+				// let floor_plan = test_plan.floor_plans[i]
 				ui.m(10)
 				ui.stack()
 					ui.bb('', null, null, 1, 'light')
-					ui.plan_view('pv'+i, test_plan.level_plan(test_plan.levels[i]))
+					ui.plan_view('pv'+floor_plan.i, floor_plan)
 				ui.end_stack()
 			}
 
-			/*
 			ui.v()
 
 				for (let face = 1; face <= 4; face++) {
 					ui.m(10)
 					ui.stack()
 						ui.bb('', null, null, 1, 'light')
-						//ui.face_view('fv'+face, test_plan, face)
+						ui.face_view('fv'+face, test_plan, face)
 					ui.end_stack()
 				}
 
 			ui.end_v()
-			//ui.comps()
-			*/
 
 		ui.end_h()
 
