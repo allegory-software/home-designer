@@ -1,7 +1,7 @@
 /*
 
 	3D math lib.
-	Written by Cosmin Apreutesei. Public domain.
+	Written by Cosmin Apreutesei. Public Domain.
 
 	Code adapted from three.js and glMatrix, MIT License.
 
@@ -74,7 +74,7 @@
 		closest_point_to_point_t closest_point_to_point intersect_line intersect_plane intersects_plane
 		transform
 
-	box3 [min_p, max_p]
+	box[3] [min_p, max_p]
 		set assign to clone equals reset to_array to[_box3]_array from[_box3]_array add
 		is_empty center delta contains_point contains_box intersects_box
 		transform translate
@@ -175,7 +175,7 @@ let v2_class = class v extends Array {
 	}
 
 	add(v, s) {
-		s = or(s, 1)
+		s = s ?? 1
 		this[0] += v[0] * s
 		this[1] += v[1] * s
 		return this
@@ -294,7 +294,7 @@ v2 = function v2(x, y) { return new v2_class(x, y) }
 v2.class = v2_class
 
 v2.add = function add(a, b, s, out) {
-	s = or(s, 1)
+	s = s ?? 1
 	out[0] = (a[0] + b[0]) * s
 	out[1] = (a[1] + b[1]) * s
 	return out
@@ -360,7 +360,7 @@ let v3_class = class v extends Array {
 			z = v[2]
 		} else if (x.is_v2) { // (v2, z)
 			let v = x
-			z = or(y, 0)
+			z = y ?? 0
 			x = v[0]
 			y = v[1]
 		} else if (x.is_mat4) {
@@ -467,7 +467,7 @@ let v3_class = class v extends Array {
 	}
 
 	add(v, s) {
-		s = or(s, 1)
+		s = s ?? 1
 		this[0] += v[0] * s
 		this[1] += v[1] * s
 		this[2] += v[2] * s
@@ -651,7 +651,7 @@ v3.cross = function(a, b, out) {
 }
 
 v3.add = function add(a, b, s, out) {
-	s = or(s, 1)
+	s = s ?? 1
 	out[0] = a[0] + b[0] * s
 	out[1] = a[1] + b[1] * s
 	out[2] = a[2] + b[2] * s
@@ -702,7 +702,7 @@ let _v4 = v3()
 let v4_class = class v extends Array {
 
 	constructor(x, y, z, w) {
-		super(x || 0, y || 0, z || 0, or(w, 1))
+		super(x || 0, y || 0, z || 0, w ?? 1)
 	}
 
 	set(x, y, z, w) {
@@ -714,14 +714,14 @@ let v4_class = class v extends Array {
 			w = v[3]
 		} else if (x.is_v3) {
 			let v = x
-			w = or(y, 1)
+			w = y ?? 1
 			x = v[0]
 			y = v[1]
 			z = v[2]
 		} else if (x.is_v2) {
 			let v = x
-			z = or(y, 0)
-			w = or(z, 1)
+			z = y ?? 0
+			w = z ?? 1
 			x = v[0]
 			y = v[1]
 		} else if (y == null) {
@@ -810,7 +810,7 @@ let v4_class = class v extends Array {
 
 	from_hsl(h, s, L, a) {
 		set_hsl(this, h, s, L)
-		this[3] = or(a, 1)
+		this[3] = a ?? 1
 		return this
 	}
 
@@ -827,7 +827,7 @@ let v4_class = class v extends Array {
 	}
 
 	add(v, s) {
-		s = or(s, 1)
+		s = s ?? 1
 		this[0] += v[0] * s
 		this[1] += v[1] * s
 		this[2] += v[2] * s
@@ -949,7 +949,7 @@ v4 = function v4(x, y, z, w) { return new v4_class(x, y, z, w) }
 v4.class = v4_class
 
 v4.add = function add(a, v, s, out) {
-	s = or(s, 1)
+	s = s ?? 1
 	out[0] = a[0] + v[0] * s
 	out[1] = a[1] + v[1] * s
 	out[2] = a[2] + v[2] * s
@@ -1141,7 +1141,7 @@ let mat3_type = function(super_class, super_args) {
 				x = v[0]
 				y = v[1]
 			} else {
-				y = or(y, x)
+				y = y ?? x
 			}
 			this[0] *= x
 			this[3] *= x
@@ -1468,8 +1468,8 @@ let mat4_type = function(super_class, super_args) {
 				y = v[1]
 				z = v[2]
 			} else {
-				y = or(y, x)
-				z = or(z, x)
+				y = y ?? x
+				z = z ?? x
 			}
 			this[ 0] *= x
 			this[ 4] *= y
@@ -1825,7 +1825,7 @@ mat4f32.identity = mat4f32()
 let quat_class = class q extends Array {
 
 	constructor(x, y, z, w) {
-		super(x || 0, y || 0, z || 0, or(w, 1))
+		super(x || 0, y || 0, z || 0, w ?? 1)
 	}
 
 	set(x, y, z, w) {
@@ -1839,7 +1839,7 @@ let quat_class = class q extends Array {
 		this[0] = x
 		this[1] = y
 		this[2] = z
-		this[3] = or(w, 1)
+		this[3] = w ?? 1
 		return this
 	}
 
@@ -3212,6 +3212,7 @@ property(box3_class, 'min', function() { return this[0] }, function(v) { this[0]
 property(box3_class, 'max', function() { return this[1] }, function(v) { this[1] = v })
 
 box3 = function(x1, y1, x2, y2) { return new box3_class(x1, y1, x2, y2) }
+box = box3
 
 // templates for parametric modeling -----------------------------------------
 
@@ -3419,7 +3420,7 @@ camera = function(e) {
 		assert(out.is_v4)
 		out[0] = (2 * x) / w - 1
 		out[1] = 1 - (2 * y) / h
-		out[2] = or(z, 1)
+		out[2] = z ?? 1
 		out[3] = 1
 		return out
 	}
@@ -3438,7 +3439,7 @@ camera = function(e) {
 	// z_clip is 1..-1 (near..far planes)
 	e.screen_to_view = function(x, y, z_clip, out) {
 		assert(out.is_v4)
-		return e.screen_to_clip(x, y, or(z_clip, 1), out).transform(e.inv_proj)
+		return e.screen_to_clip(x, y, z_clip ?? 1, out).transform(e.inv_proj)
 	}
 
 	e.clip_to_world = function(p, out) {

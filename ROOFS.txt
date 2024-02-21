@@ -1,0 +1,64 @@
+
+ROOF ANALYSIS
+
+- roof slope intersections: create hips and valleys at 45 deg if both have the same slope.
+
+- gable roofs:
+	- unlike hip roofs, the sides can be segmented and fall at different elevations.
+		- can follow *any* wall contour with constant eaves width
+		- ridge can be adjusted on _|_ axis to achieve half-floor on one side and full on the other
+
+- same-slope roofs intersecting on the same axis and on a common wall => merged faces.
+
+- gables intersecting walls:
+	- ??
+
+- gables cross-intersecting gables:
+	- eave elevation alignment:
+		- same: valley extends to form eave
+		- diff: lower roof extends underneath the eave of the upper roof
+
+- hip roofs cross-intersecting walls (porches):
+	- on one face: can have constant slope
+		- can wrap around side walls
+	- on outside corner: can't have constant slope if hip is meant to meet at the corner
+
+- side roofs:
+	- can wrap around a suspended volume (volume creates inside + outside corners)
+	- can wrap around the house (house side corners)
+	- shading roof: secondary single-slope roof attached to gable-end wall
+	- porch: lower-sloped roof extending side of house roof
+
+- dormers:
+	- front face:
+		- aligned to wall underneath: face stands on wall, roof goes around it
+		- suspended: just like other faces
+	- back face:
+		- completely sunk, dormer roof intersects house roof
+	- single-slope dormer roof aligns with house ridge
+	- combined dormers of different roof types
+
+
+
+
+
+ORNAMENTAL DETAILS
+
+- trellis attached to wall
+
+- eaves closing:
+	- soffit
+	- exposed rafters (cut straight-to-ground or straight-to-rafter)
+	- fascia board
+
+- double-angle eaves (ornamental):
+	- just attach extensions to rafters at an angle
+
+- gable sides detail at gable end wall:
+	- no detail
+	- connect each side with a continuous little one-slope roof (ugly)
+	- wrap around the gable end wall with a little 2-side hip roof (ugly)
+	- if there's a soffit, close it with a triangle: at face (ugly) or at wall (meh)
+
+- trellis joist header continuing porch lintel
+

@@ -1,3 +1,57 @@
+ROOF EDITOR
+
+	- ??
+
+
+FINISH FACE EDITOR
+
+	- ZOOM
+	- FLIP
+	- SELECT SECTION (MAX PLANE)
+	- MOVE WALL
+	- MOVE OPENING
+
+FINISH PLAN EIDTOR
+
+	- SNAP WHEN MOVING FREELY
+	- SNAP MOVE BASED ON MEASURES
+	- ALLOW CHANGING DIRECTION WHILE RESIZING
+	- MOVE + RESIZE WHEN ANCHORED TO A WALL
+	- PROPORTIONAL MOVE vs RESIZE HIT AREAS WITH MIN & MAX
+	- CLICK-MOVE-CLICK DRAW MODE (ESC TO CANCEL)
+
+WALL OFFSETING WITH OPENINGS
+
+	- METHOD 1 / GEOMETRIC:
+		- keep a parallel set of segs that are broken at openings
+		- find_comps() -- seg split can create islands
+		- extract_cycles() -- there should be no inner cycles
+			- except for basements and mansards which should have a stair.
+		- create_edges()
+	- METHOD 2 / RASTER:
+		- create clipping rects for openings before painting the walls.
+		- draw wall strokes with proper miter (extend the corners a little).
+		- draw openings over.
+
+FINISH OPENINGS EDITOR
+
+	- ??
+
+FINISH DEMO
+
+	- UNDO-REDO
+	- SAVE/LOAD TO LOCAL STORAGE
+	- TOUCH INPUT
+
+
+BUGS
+	- hit_poly() - must ignore filaments
+
+
+
+==============================================================================
+
+
 
 - TODO: drag-move opening: pick the closest free range and clamp to it.
 
