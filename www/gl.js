@@ -128,6 +128,7 @@ function count_call(name, args, t) {
 	t._n++
 }
 
+// wrap all webgl methods for tracing the webgl calls.
 gl.wrap_calls = function() {
 	for (let name in methods) {
 		let f = methods[name]
@@ -170,8 +171,8 @@ gl.clear_all = function(r, g, b, a, depth) {
 		gl.draw_fbo.clear_depth_stencil(depth)
 	} else {
 		if (r != null)
-			gl.clearColor(r, g, b, or(a, 1))
-		gl.clearDepth(or(depth, 1))
+			gl.clearColor(r, g, b, a ?? 1)
+		gl.clearDepth(depth ?? 1)
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	}
 	gl.enable(gl.DEPTH_TEST)
@@ -267,7 +268,7 @@ for (let [gl_type, type, arr_type, nc, val_gl_type, nloc] of [
 ]) {
 	let bt = {
 		gl_type: gl_type,
-		val_gl_type: or(val_gl_type, gl_type),
+		val_gl_type: val_gl_type ?? gl_type,
 		type: type,
 		arr_type: arr_type,
 		nc: nc,
@@ -547,7 +548,7 @@ prog.set_uni = function(name, x, y, z, w) {
 			z = (c >>  8 & 0xff) / 255
 			w = (c       & 0xff) / 255
 		}
-		w = or(w, 1)
+		w ??= 1
 		let v = u.value
 		if (!v || x != v[0] || y != v[1] || z != v[2] || w != v[3]) {
 			gl.uniform4f(loc, x, y, z, w)
@@ -857,7 +858,7 @@ property(vao, 'vertex_count', function() {
 	if (this.buffers)
 		for (let b of this.buffers)
 			if (b && !b.inst_div)
-				min_len = min(or(min_len, 1/0), b.len)
+				min_len = min(min_len ?? 1/0, b.len)
 	return min_len || 0
 })
 
@@ -866,7 +867,7 @@ property(vao, 'instance_count', function() {
 	if (this.buffers)
 		for (let b of this.buffers)
 			if (b && b.inst_div)
-				min_len = min(or(min_len, 1/0), b.len)
+				min_len = min(min_len ?? 1/0, b.len)
 	return min_len || 0
 })
 
@@ -930,8 +931,8 @@ function check_arr_type(arr, arr_type) {
 
 function check_arr_nc(arr, nc) {
 	let arr_nc = arr.nc
-	nc = or(or(nc, arr_nc), 1)
-	assert(or(arr_nc, nc) == nc, 'different number of components {0}, expected {1}', arr_nc, nc)
+	nc ??= arr_nc ?? 1
+	assert((arr_nc ?? nc) == nc, 'different number of components {0}, expected {1}', arr_nc, nc)
 	return nc
 }
 
@@ -1004,7 +1005,7 @@ gl.buffer = function(data_or_cap, type, inst_div, for_index) {
 function index_bt(data_or_cap, type_or_max_idx) {
 	if (!isnum(type_or_max_idx))
 		type_or_max_idx = get_bt(type_or_max_idx || 'u8').arr_type
-	let arr_type = dyn_arr.index_arr_type(or(type_or_max_idx, or(data_or_cap, 0)))
+	let arr_type = dyn_arr.index_arr_type(type_or_max_idx ?? data_or_cap ?? 0)
 	return assert(bt_by_arr_type.get(arr_type))
 }
 
@@ -1400,7 +1401,7 @@ gl.texture = function(type) {
 gl.bind_texture = function(type, tex1, unit) {
 	let gl = this
 	type = type || '2d'
-	unit = or(unit, -1)
+	unit ??= -1
 	if (unit < 0)
 		unit = gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) + unit
 	let units = attr(attr(gl, 'tex_units'), type, Array)
@@ -1538,7 +1539,7 @@ tex.set_image = function(image, pixel_scale, side) {
 	let w = image.width
 	let h = image.height
 	if (!side) {
-		pixel_scale = or(pixel_scale, 1)
+		pixel_scale ??= 1
 		this.uv = v2(
 			1 / (w * pixel_scale),
 			1 / (h * pixel_scale)
@@ -1583,7 +1584,7 @@ let parse_wrap = function(s) {
 
 tex.set_wrap = function(wrap_s, wrap_t) {
 	let gl = this.gl
-	wrap_t = or(wrap_t, wrap_s)
+	wrap_t ??= wrap_s
 
 	this.bind()
 	gl.texParameteri(this.gl_target, gl.TEXTURE_WRAP_S, parse_wrap(wrap_s))
@@ -1893,8 +1894,8 @@ fbo.attach = function(tex_or_rbo, target, color_unit) {
 	} else
 		assert(false, 'rbo or texture expected')
 
-	this.w = or(tex_or_rbo.w, this.w)
-	this.h = or(tex_or_rbo.h, this.h)
+	this.w = tex_or_rbo.w ?? this.w
+	this.h = tex_or_rbo.h ?? this.h
 
 	this.attachments[target + color_unit] = tex_or_rbo
 
@@ -1911,13 +1912,13 @@ fbo.clear_color = function(color_unit, r, g, b, a) {
 		_c[0] = r
 		_c[1] = g
 		_c[2] = b
-		_c[3] = or(a, 1)
+		_c[3] = a ?? 1
 		gl.clearBufferfv(gl.COLOR, color_unit, _c)
 	} else if (tex.format == 'rgba16') {
 		_u[0] = r
 		_u[1] = g
 		_u[2] = b
-		_u[3] = or(a, 1)
+		_u[3] = a ?? 1
 		gl.clearBufferuiv(gl.COLOR, color_unit, _u)
 	} else if (tex.format == 'u32') {
 		_u[0] = r
@@ -1930,7 +1931,7 @@ fbo.clear_color = function(color_unit, r, g, b, a) {
 fbo.clear_depth_stencil = function(depth, stencil) {
 	let gl = this.gl
 	assert(gl.draw_fbo == this, 'not the draw fbo')
-	gl.clearBufferfi(gl.DEPTH_STENCIL, 0, or(depth, 1), or(stencil, 0))
+	gl.clearBufferfi(gl.DEPTH_STENCIL, 0, depth ?? 1, stencil ?? 0)
 }
 
 }()) // module scope.

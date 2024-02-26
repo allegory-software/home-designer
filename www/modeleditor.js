@@ -5,23 +5,50 @@
 
 */
 
-TRACE = 0
-LOG   = 1
-DEBUG = 0
+(function () {
+"use strict"
+const G = window
 
-component('x-modeleditor', function(e) {
+let TRACE = 0
+let LOG   = 1
 
-	let pe = e
-
-	function log(s, ...args) {
-		assert(LOG)
-		pr(s, ...args)
+// stack with freelist.
+function freelist_stack(create) {
+	let e = {}
+	let stack = []
+	let fl = freelist(create)
+	e.push = function() {
+		let e = fl.alloc()
+		stack.push(e)
+		return e
 	}
+	e.pop = function() {
+		let e = stack.pop()
+		fl.free(e)
+		return e
+	}
+	e.clear = function() {
+		while (this.pop());
+	}
+	e.stack = stack
+	return e
+}
+
+function modeleditor(e) {
+
+	let id = e.id
+	let house = e.house
+
+	e.prop = function(k, t) {
+		e[k] = t.default
+	}
+
+	e.draw_state = {}
 
 	// colors ------------------------------------------------------------------
 
 	let white = 0xffffff
-	let black = 0x000000
+	let black = ui.fg_color_rgb('text')
 	let selected_color = 0x0000ff
 	let ref_color = 0xff00ff
 	let x_axis_color = 0x990000
@@ -30,11 +57,15 @@ component('x-modeleditor', function(e) {
 
 	// canvas & webgl context -------------------------------------------------
 
-	focusable_widget(e)
-	selectable_widget(e)
+	let canvas = document.createElement('canvas')
+	canvas.classList.add('modeleditor-canvas')
+	canvas.style.position = 'absolute'
+	canvas.style.zIndex = -1 // put it behind the 2D canvas which serves as overlay.
 
-	let canvas = tag('canvas')
-	e.add(canvas)
+	ui.screen.appendChild(canvas)
+	ui.on_free(id, function() {
+		canvas.remove()
+	})
 
 	let gl = assert(canvas.getContext('webgl2'))
 	//gl.wrap_calls()
@@ -46,7 +77,7 @@ component('x-modeleditor', function(e) {
 	let max_distance = 1e4    // max model total distance
 
 	function update_camera_proj() {
-		camera.view_size.set(floor(canvas.cw), floor(canvas.ch))
+		camera.view_size.set(floor(cw), floor(ch))
 		if (e.projection == 'ortho') {
 			camera.ortho(-10, 10, -10, 10, -1e2, 1e2)
 		} else {
@@ -73,7 +104,8 @@ component('x-modeleditor', function(e) {
 	function update_camera() {
 		camera.update()
 
-		skybox.update_view(camera.pos)
+		if (skybox)
+			skybox.update_view(camera.pos)
 
 		update_helper_points()
 		update_sunlight_pos()
@@ -122,22 +154,22 @@ component('x-modeleditor', function(e) {
 
 	// rendering --------------------------------------------------------------
 
-	e.prop('skybox', {store: 'var', type: 'bool', default: true, attr: true})
-	e.prop('background_color', {store: 'var', type: 'color', default: '#ffffff', attr: true})
+	e.prop('skybox', {store: 'var', type: 'bool', default: false, attr: true})
+	e.prop('background_color', {store: 'var', type: 'color', default: '#ffffff00', attr: true})
 
-	bg_color = () => v3().from_rgb(e.background_color)
+	let bg_color = () => v4().from_rgba(e.background_color)
 
 	e.set_background_color = function(v) {
 		renderer.background_color = bg_color()
-		render()
+		ui.animate()
 	}
 
 	function draw(prog) {
 		if (TRACE)
 			gl.start_trace()
 		let t0 = time()
-		if (e.skybox)
-			skybox.draw(prog)
+		if (skybox)
+		 	skybox.draw(prog)
 		//ground_rr.draw(prog)
 		draw_model(prog)
 		if (TRACE)
@@ -155,31 +187,41 @@ component('x-modeleditor', function(e) {
 		})
 	}
 
-	let raf_id
-	function do_render() {
+	e.draw_state.draw = function() {
 		renderer.render(draw)
-		raf_id = null
-	}
-
-	function render() {
-		if (!raf_id)
-			raf_id = raf(do_render)
 	}
 
 	function update_renderer() {
 		renderer.update()
-		render()
+		ui.animate()
 	}
 
-	e.on('resize', function(r) {
-		let w = floor(r.w)
-		let h = floor(r.h)
-		canvas.w = w
-		canvas.h = h
-		canvas.width  = w
-		canvas.height = h
-		update_camera_proj()
-	})
+	let cx, cy, cw, ch, dpr
+	e.position = function(x, y, w, h) {
+		let dpr1 = devicePixelRatio
+		let rescale = dpr1 != dpr
+		let resize = w != cw || h != ch || rescale
+		let repos = x != cx || y != cy || rescale
+		dpr = dpr1
+		if (repos) {
+			cx = x
+			cy = y
+			canvas.style.left = (x / dpr) + 'px'
+			canvas.style.top  = (y / dpr) + 'px'
+		}
+		if (resize) {
+			cw = w
+			ch = h
+			canvas.style.width  = (w / dpr) + 'px'
+			canvas.style.height = (h / dpr) + 'px'
+			canvas.width  = w
+			canvas.height = h
+			canvas.cw = w
+			canvas.ch = h
+			update_camera_proj()
+			ui.animate()
+		}
+	}
 
 	// undo/redo stacks -------------------------------------------------------
 
@@ -266,11 +308,11 @@ component('x-modeleditor', function(e) {
 
 	function add_layer(opt, ev) {
 
-		layer = ev && ev.layer || assign({visible: true, can_hide: true}, opt)
-		layers.insert(ev && ev.index, layer)
+		let layer = ev && ev.layer || assign({visible: true, can_hide: true}, opt)
+		insert(layers, ev && ev.index, layer)
 		instances_valid = false
 
-		let i = or(ev && ev.index, layers.length - 1)
+		let i = (ev && ev.index) ?? layers.length - 1
 
 		if (LOG)
 			log('add_layer', opt, ev, layer, i)
@@ -348,6 +390,7 @@ component('x-modeleditor', function(e) {
 				child_removed    : child_removed,
 				layer_changed    : layer_changed,
 				helper_point     : helper_point,
+			   black            : black,
 			}))
 		let id = comps.length
 		comps[id] = comp
@@ -396,8 +439,7 @@ component('x-modeleditor', function(e) {
 
 	}
 
-	{
-	let mstack = freelist_stack(() => mat4(), noop, noop)
+	let mstack = freelist_stack(() => mat4())
 	let disabled_arr = [0]
 	function update_instances_for(node, parent, path_depth, on_cur_path) {
 
@@ -427,7 +469,7 @@ component('x-modeleditor', function(e) {
 		}
 
 		mstack.pop()
-	}}
+	}
 
 	function update_instances() {
 
@@ -473,7 +515,7 @@ component('x-modeleditor', function(e) {
 	function update() {
 		update_instances()
 		update_comp(cur_comp)
-		render()
+		ui.animate()
 	}
 
 	function update_all() {
@@ -497,7 +539,7 @@ component('x-modeleditor', function(e) {
 
 	// instance path finding for hit testing
 
-	{
+	let instance_path; {
 	let path = []
 	function instance_path_for(target_comp, target_inst_id, node) {
 		path.push(node)
@@ -510,7 +552,7 @@ component('x-modeleditor', function(e) {
 		}
 		path.pop(node)
 	}
-	function instance_path(comp, inst_id) {
+	instance_path = function(comp, inst_id) {
 		for (let comp of comps)
 			comp._inst_id = 0
 		path.length = 0
@@ -532,9 +574,9 @@ component('x-modeleditor', function(e) {
 
 	// model-wide instance intersection tests
 
-	{
+	let line_hit_lines; {
 	let _m0 = mat4()
-	function line_hit_lines(target_line, max_d, p2p_distance2, int_mode, is_line_valid, is_int_line_valid) {
+	line_hit_lines = function(target_line, max_d, p2p_distance2, int_mode, is_line_valid, is_int_line_valid) {
 		if (!max_d)
 			return
 		for (let comp of comps) {
@@ -728,12 +770,12 @@ component('x-modeleditor', function(e) {
 	}
 
 	// connect rendered comp_id/face_id/inst_id back to the model.
-	{
+	let mouse_hit_faces; {
 	let _v0 = v3()
 	let _l0 = line3()
 	let _m0 = mat4()
 	let _pl0 = plane()
-	function mouse_hit_faces() {
+	mouse_hit_faces = function() {
 
 		if (!(mouse.valid || mouse.prevent_validate)) {
 			hit_test_rr.render(draw_model_for_hit_test)
@@ -801,9 +843,9 @@ component('x-modeleditor', function(e) {
 
 	}
 
-	{
+	let mouse_hit_model; {
 	let _v0 = v3()
-	function mouse_hit_model(opt) {
+	mouse_hit_model = function(opt) {
 
 		let int_p = mouse_hit_faces()
 
@@ -951,17 +993,22 @@ component('x-modeleditor', function(e) {
 
 	// skybox -----------------------------------------------------------------
 
-	let skybox = gl.skybox({
-		images: {
-			posx: 'x-modeleditor/skybox_posx.jpg',
-			negx: 'x-modeleditor/skybox_negx.jpg',
-			posy: 'x-modeleditor/skybox_posy.jpg',
-			negy: 'x-modeleditor/skybox_negy.jpg',
-			posz: 'x-modeleditor/skybox_posz.jpg',
-			negz: 'x-modeleditor/skybox_negz.jpg',
-		},
-	})
-	skybox.on('load', render)
+	let skybox
+	if (e.skybox) {
+		skybox = gl.skybox({
+			images: {
+				posx: '../www/skybox_posx.jpg',
+				negx: '../www/skybox_negx.jpg',
+				posy: '../www/skybox_posy.jpg',
+				negy: '../www/skybox_negy.jpg',
+				posz: '../www/skybox_posz.jpg',
+				negz: '../www/skybox_negz.jpg',
+			},
+		})
+		skybox.addEventListener('load', function() {
+			ui.animate()
+		})
+	}
 
 	// shadow ground plane ----------------------------------------------------
 
@@ -985,19 +1032,19 @@ component('x-modeleditor', function(e) {
 		move          : [15,17],
 	}
 	let cursor
-	e.property('cursor', () => cursor, function(name) {
+	property(e, 'cursor', () => cursor, function(name) {
 		if (cursor == name)
 			return
 		cursor = name
 		let x = offsets[name] && offsets[name][0] || 0
 		let y = offsets[name] && offsets[name][1] || 0
-		e.style.cursor = builtin_cursors[name] ? name : 'url(x-modeleditor/cursor_'+name+'.png) '+x+' '+y+', auto'
+		e.cursor_url = builtin_cursors[name] ? name : 'url(../www/cursor_'+name+'.png) '+x+' '+y+', auto'
 	})
 	}
 
 	// cursor tooltip ---------------------------------------------------------
 
-	{
+	if (0) {
 	let tt = tooltip({kind: 'cursor', //timeout: 'auto',
 		side: 'inner-top', align: 'start',
 		target: e})
@@ -1007,7 +1054,7 @@ component('x-modeleditor', function(e) {
 		tt.show()
 	})
 
-	e.property('tooltip', () => tt.text, function(s) {
+	property(e, 'tooltip', () => tt.text, function(s) {
 		tt.hide()
 		tt.text = s
 		tt.px = mouse.x
@@ -1024,6 +1071,7 @@ component('x-modeleditor', function(e) {
 		p = p || v3()
 		assign(p, opt)
 
+		/*
 		let s = 'model-editor-dot'
 		let e = div({class: (p.text != null ? s+'-debug '+s+'-debug-'+p.type : s)})
 		if (p.text != null)
@@ -1047,14 +1095,15 @@ component('x-modeleditor', function(e) {
 		pe.add(e)
 		e.point = p
 		e.update = p.update
+		*/
+
+		p.update = noop
 
 		return p
 	}
 
 	function update_helper_points() {
-		for (let ce of e.at)
-			if (ce.update)
-				ce.update()
+			// TODO:
 	}
 
 	// helper lines -----------------------------------------------------------
@@ -1072,7 +1121,7 @@ component('x-modeleditor', function(e) {
 	let tool // current tool
 	{
 		let toolname
-		e.property('tool', () => toolname, function(name) {
+		property(e, 'tool', () => toolname, function(name) {
 			e.tooltip = ''
 			if (tool && tool.bind)
 				tool.bind(false)
@@ -1115,8 +1164,8 @@ component('x-modeleditor', function(e) {
 			if (panning) {
 				camera.pan(hit_point, mx0, my0, mx, my)
 			} else {
-				let dx = (mx - mx0) / 150
-				let dy = (my - my0) / 150
+				let dx = (mx - mx0) / 400
+				let dy = (my - my0) / 400
 				camera.orbit(hit_point, dy, dx, 0)
 			}
 			update_camera()
@@ -1462,8 +1511,8 @@ component('x-modeleditor', function(e) {
 		cur_point.visible = !!p.snap
 		e.tooltip = snap_tooltips[p.snap || p.line_snap] || p.tooltip
 		cur_point.snap = p2.snap
-		cur_line.color = or(line_snap_colors[p2.line_snap], black)
-		ref_line.color = or(line_snap_colors[ref_line.snap], black)
+		cur_line.color = line_snap_colors[p2.line_snap] ?? black
+		ref_line.color = line_snap_colors[ref_line.snap] ?? black
 
 		cur_point.update()
 		cur_line.update()
@@ -1677,10 +1726,9 @@ component('x-modeleditor', function(e) {
 	let mouse = v3(false, false, 0)
 	mouse.ray = line3()
 
-	function update_mouse(ev) {
-		let r = e.rect()
-		let mx = ev.clientX - r.x
-		let my = ev.clientY - r.y
+	function update_mouse() {
+		let mx = ui.mx - cx
+		let my = ui.my - cy
 		let pos_changed = mx != mouse.x || my != mouse.y
 		mouse.x = mx
 		mouse.y = my
@@ -1696,37 +1744,42 @@ component('x-modeleditor', function(e) {
 			tool.pointermove()
 	}
 
-	let captured
+	let captured_move, captured_up
+	e.capture_pointer = function(on_move, on_up) {
+		captured_move = on_move
+		captured_up   = on_up
+	}
 
-	e.on('pointermove', function(ev) {
-		update_mouse(ev)
+	e.pointermove = function() {
+		update_mouse()
 		fire_pointermove()
-	})
+		if (captured_move)
+			captured_move()
+	}
 
-	e.on('pointerdown', function(ev) {
-		e.focus()
+	e.pointerdown = function() {
 		mouse.prevent_validate = false
-		if (update_mouse(ev))
+		if (update_mouse())
 			fire_pointermove()
 		if (tool.pointerdown) {
 			let captured, captured_move
 			function capture(move, up) {
 				let mouse0 = v3()
 				let _v0 = v3()
-				let movewrap = move && function(ev) {
-					update_mouse(ev)
+				let movewrap = move && function() {
+					update_mouse()
 					if (!mouse.dragging)
 						mouse.dragging = mouse0.to(_v0).sub(mouse).len() > max_hit_distances.drag_pull
 					move()
 				}
-				let upwrap = function(ev) {
-					update_mouse(ev)
+				let upwrap = function() {
+					update_mouse()
 					if (up)
 						up()
 					mouse.dragging = false
 				}
 				mouse0.set(mouse)
-				captured = e.capture_pointer(ev, movewrap, upwrap)
+				captured = e.capture_pointer(movewrap, upwrap)
 				captured_move = move
 			}
 			tool.pointerdown(capture)
@@ -1737,44 +1790,49 @@ component('x-modeleditor', function(e) {
 				captured_move()
 			return captured
 		}
-	})
+	}
 
-	e.on('pointerup', function(ev) {
+	e.pointerup = function() {
 		mouse.prevent_validate = false
-		if (update_mouse(ev))
+		if (update_mouse())
 			fire_pointermove()
-		if (tool.pointerup) {
+		if (captured_up) {
+			captured_up()
+			captured_move = null
+			captured_up = null
+		} else if (tool.pointerup) {
 			tool.pointerup()
 			// guarantee a mouse move after each mouse up.
 			fire_pointermove()
 		}
-	})
+	}
 
-	e.on('pointerleave', function(ev) {
+	e.pointerleave = function() {
 		e.tooltip = ''
-	})
+	}
 
-	e.on('click', function(ev, nclicks) {
+	e.click = function(nclicks) {
 		mouse.prevent_validate = false
-		if (update_mouse(ev))
+		if (update_mouse())
 			fire_pointermove()
 		if (tool.click) {
 			tool.click(nclicks)
 			// guarantee a mouse move after each click.
 			fire_pointermove()
 		}
-	})
+	}
 
-	e.on('wheel', function(ev, dy) {
+	e.wheel = function() {
+		let dy = ui.wheel_dy / 120
 		close_context_menu()
-		if (update_mouse(ev))
+		if (update_mouse())
 			fire_pointermove()
 		mouse.prevent_validate = false
 		let hit_point = mouse_hit_model({mode: 'camera'})
 		camera.dolly(hit_point, 1 + 0.4 * dy)
 		update_camera()
 		return false
-	})
+	}
 
 	let tool_keys = {
 		l: 'line',
@@ -1789,16 +1847,15 @@ component('x-modeleditor', function(e) {
 
 	let shift, ctrl, alt
 
-	function update_keys(ev) {
-		shift = ev.shiftKey
-		ctrl  = ev.ctrlKey
-		alt   = ev.altKey
+	function update_keys() {
+		shift = ui.key('shift')
+		ctrl  = ui.key('control')
+		alt   = ui.key('alt')
 	}
 
-	e.on('keydown', function(key, shift, ctrl, alt, ev) {
+	e.keydown = function(key) {
 		mouse.prevent_validate = false
-		update_keys(ev)
-		key = key.lower()
+		update_keys()
 		if (key == 'delete') {
 			remove_selection()
 			update()
@@ -1845,7 +1902,7 @@ component('x-modeleditor', function(e) {
 		}
 		if (shift || ctrl)
 			return
-		let toolname = tool_keys[key.toLowerCase()]
+		let toolname = tool_keys[key]
 		if (toolname) {
 			e.tool = toolname
 			return false
@@ -1854,28 +1911,25 @@ component('x-modeleditor', function(e) {
 			e.tool = e.tool == 'select' ? 'orbit' : 'select'
 			return false
 		}
-	})
+	}
 
-	function keyup(key, ev) {
+	e.keyup = function(key) {
 		mouse.prevent_validate = false
-		update_keys(ev)
+		update_keys()
 		if (!tool.keyup)
 			return
 		if (tool.keyup(key) === false)
 			return false
 	}
 
-	e.on('keyup', function(key, shift, ctrl, alt, ev) {
-		keyup(key, ev)
-	})
-
+	// TODO
 	// [alt+][ctrl+][shift+]tab switches the tab/window and makes us lose
 	// keyup events on shift/ctrl/alt, so we force some keyup events on blur.
-	window.on('blur', function(ev) {
-		keyup('shift', ev)
-		keyup('ctrl' , ev)
-		keyup('alt'  , ev)
-	})
+	// window.on('blur', function(ev) {
+	// 	keyup('shift')
+	// 	keyup('control')
+	// 	keyup('alt')
+	// })
 
 	// context menu -----------------------------------------------------------
 
@@ -1888,9 +1942,9 @@ component('x-modeleditor', function(e) {
 		}
 	}
 
-	e.on('rightpointerdown', close_context_menu)
+	e.rightpointerdown = close_context_menu
 
-	e.on('contextmenu', function(ev) {
+	e.contextmenu = function() {
 
 		close_context_menu()
 
@@ -1909,7 +1963,7 @@ component('x-modeleditor', function(e) {
 		cmenu.popup(e, 'inner-top', null, null, null, null, null, mouse.x, mouse.y)
 
 		return false
-	})
+	}
 
 	// materials list ---------------------------------------------------------
 
@@ -2214,21 +2268,18 @@ component('x-modeleditor', function(e) {
 				-1,  1,  0,
 			],
 			faces: [
-				[1, 0, 3, 2],
-				[4, 5, 6, 7],
-				[7, 6, 2, 3], //[6, 2, 3],
-				[4, 0, 1, 5],
-				[0, 4, 7, 3],
-				[5, 1, 2, 6],
+				{pis: [1, 0, 3, 2], material: mat1},
+				{pis: [4, 5, 6, 7], material: mat1},
+				{pis: [7, 6, 2, 3], material: mat2},
+				//6, 2, 3,
+				{pis: [4, 0, 1, 5]},
+				{pis: [0, 4, 7, 3]},
+				{pis: [5, 1, 2, 6]},
 			],
 			lines: [
-				//8, 9,
+				8, 9,
 			],
 		}
-
-		//m.faces[0].material = mat1
-		//m.faces[1].material = mat1
-		//m.faces[2].material = mat2
 
 		let c0 = root.comp
 		let c1 = e.create_component({name: 'c1'})
@@ -2273,22 +2324,229 @@ component('x-modeleditor', function(e) {
 
 	}
 
+	function create_plan() {
+		for (let floor of house.floors) {
+
+			let m = {points: [], faces: [], lines: []}
+			let i = 0
+			for (let fcomp of floor.comps) {
+				for (let cycle of fcomp.cycles) {
+					for (let ep of cycle.edges) {
+						m.points.push(ep[0], 0, ep[1])
+						ep._i = i++
+					}
+				}
+			}
+			for (let fcomp of floor.comps) {
+				let f = {pis: [], holes: []}
+				m.faces.push(f)
+				for (let a = fcomp.outer_cycle.edges, i = a.length-1; i >= 0; i--)
+					f.pis.push(a[i]._i)
+				for (let cycle of fcomp.cycles) {
+					if (cycle.outer)
+						continue
+					let hole_pis = []
+					f.holes.push(hole_pis)
+					for (let ep of cycle.edges)
+						hole_pis.push(ep._i)
+				}
+			}
+			if (0) { // show naked segs
+				for (let p of floor.ps) {
+					let [x, y] = p
+					m.points.push(x, 0, y)
+					p._i = i++
+				}
+				for (let [p1, p2] of floor.segs) {
+					m.lines.push(p1._i, p2._i)
+				}
+			}
+			let c = e.create_component({name: 'floor_'+floor.i})
+			c.set(m)
+			root.comp.add_child(c, mat4())
+
+			if (floor.roofs)
+				for (let roof of floor.roofs) {
+
+					let m = {points: [], faces: []}
+
+					if (roof.type == 'gable') {
+						let pitch = roof.pitch
+						let h = assert(roof.h)
+						let eaves = roof.eaves ?? 0
+						let axis = roof.axis ?? 'v'
+						let [bx1, by1, bx2, by2] = roof.box
+						let rx1, ry1, rx2, ry2
+						if (axis == 'v') {
+							ry1 = by1
+							ry2 = by2
+							rx1 = (bx2 + bx1) / 2
+							rx2 = rx1
+						} else {
+							rx1 = bx1
+							rx2 = bx2
+							ry1 = (by2 + by1) / 2
+							ry2 = ry1
+						}
+						m.points.push(rx1, h, ry1)
+						m.points.push(rx2, h, ry2)
+
+						for (let i = 0; i <= 1; i++) {
+							let f = {pis: []}
+							m.faces.push(f)
+							let x1, y1, x2, y2
+							if (axis == 'v') {
+								y1 = ry1
+								y2 = ry2
+								x1 = i ? bx2 : bx1
+								x2 = x1
+							} else {
+								x1 = rx1
+								x2 = rx2
+								y1 = i ? by2 : by1
+								y2 = y1
+							}
+							let y = h - 100
+							if (!i) {
+								m.points.push(x2, y, y2)
+								m.points.push(x1, y, y1)
+								f.pis.push(0, 1, 2, 3)
+							} else {
+								m.points.push(x1, y, y1)
+								m.points.push(x2, y, y2)
+								f.pis.push(1, 0, 4, 5)
+							}
+						}
+
+					}
+
+					let c = e.create_component({name: 'roof_'+floor.i})
+					c.set(m)
+
+					for (let f of c.faces) {
+							//
+					}
+
+					root.comp.add_child(c, mat4())
+
+				}
+
+		}
+	}
+
 	// init -------------------------------------------------------------------
 
 	init_layers()
 	init_root()
 	init_renderer()
 	update_sun_pos()
-	create_test_objects()
-	enter_edit([root]) // , root.comp.children[0]])//, root.comp.children[0].comp.children[5]])
+	//create_test_objects()
+	create_plan()
+	enter_edit([root])
+	//enter_edit([root, root.comp.children[0]])
 	update_all()
 
 	e.tool = 'orbit'
 
-	e.on('bind', function(on) {
-		// TODO: init/free DOM things...
-		if (on) {
+	return e
+}
+
+let MODELEDITOR_ID         = ui.S-1
+let MODELEDITOR_DRAW_STATE = ui.S+0
+
+ui.box_widget('modeleditor', {
+
+	create: function(cmd, id, house, fr, align, valign, min_w, min_h) {
+
+		let s = ui.state(id)
+		let me = s.get('editor')
+		me ??= modeleditor({id: id, house: house})
+		s.set('editor', me)
+
+		let [dstate, dx, dy] = ui.drag(id)
+
+		if (dstate == 'drag') {
+			ui.focus(id)
+			me.pointerdown()
+		} else if (dstate == 'dragging') {
+			me.pointermove()
+		} else if (dstate == 'drop') {
+			me.pointerup()
+		} else if (dstate == 'hover') {
+			me.pointermove()
 		}
-	})
+		if (ui.dblclick)
+			me.click(2)
+		else if (ui.click)
+			me.click(1)
+
+		if (ui.focused(id))
+			for (let [ev, key] of ui.key_events)
+				if (ev == 'down')
+					me.keydown(key)
+				else if (ev == 'up')
+					me.keyup(key)
+
+		if (dstate && me.cursor_url) {
+			ui.set_cursor(me.cursor_url)
+		}
+
+		if (dstate && ui.wheel_dy)
+			me.wheel(ui.wheel_dy)
+
+		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
+				id, me.draw_state,
+			)
+
+	},
+
+	after_position: function(a, i, axis)	{
+		let w  = a[i+2]
+		let h  = a[i+3]
+		let id = a[i+MODELEDITOR_ID]
+		//
+	},
+
+	after_translate: function(a, i) {
+		let x = a[i+0]
+		let y = a[i+1]
+		let w = a[i+2]
+		let h = a[i+3]
+		let id = a[i+MODELEDITOR_ID]
+		let me = ui.state(id).get('editor')
+		me.position(x, y, w, h)
+	},
+
+	draw: function(a, i) {
+
+		let x  = a[i+0]
+		let y  = a[i+1]
+		let w  = a[i+2]
+		let h  = a[i+3]
+		let id = a[i+MODELEDITOR_ID]
+		let ds = a[i+MODELEDITOR_DRAW_STATE]
+
+		let hs = ui.hit(id)
+
+		let cx = ui.cx
+
+		ds.draw()
+
+	},
+
+	hit: function(a, i) {
+
+		let x  = a[i+0]
+		let y  = a[i+1]
+		let w  = a[i+2]
+		let h  = a[i+3]
+		let id = a[i+MODELEDITOR_ID]
+
+		if (ui.hit_box(a, i))
+			ui.hover(id)
+
+	},
 
 })
+
+}()) // module function

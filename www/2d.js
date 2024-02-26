@@ -3,23 +3,6 @@
 	Math for undirected planar graphs.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	bbox2([x1, y1, x2, y2]) -> bbox2
-		add_point(x, y)
-		add_bbox2(x1, y1, x2, y2)
-		reset()
-		rotate(a)
-		inside_bbox2(x1, y1, x2, y2) -> t|f
-		hit(x, y) -> t|f
-
-	line_offset(d, x1, y1, x2, y2) -> [x1, y1, x2, y2]  (output array is global!)
-	line_point(t, x1, y1, x2, y2) -> [x, y]  (output array is global!)
-
-	poly([p1,...]) -> poly
-		center()
-		bbox()
-		compute_area()
-		hit(x, y) -> t|f
-
 	plane_graph(e) -> e
 
 		ps -> [p1,...]
@@ -44,314 +27,16 @@ const G = window
 const {
 	inf,
 	mod,
-	rotate_point,
 } = glue
 
-let NEAR = 1e-5
+const {
+	v2,
+} = Math3D
 
-function near(a, b) { return abs(a - b) < NEAR }
-
-let near_angle = near
-
-let out = []
-
-function points_near(p1, p2) {
-	return near(p1[0], p2[0]) && near(p1[1], p2[1])
-}
+let v2_near = v2.near
 
 let next_id = 1
 function gen_id() { return next_id++ } // stub
-
-// bbox2 class ----------------------------------------------------------------
-
-let bbox2_class = class bbox2 extends Array {
-
-	constructor(x1, y1, x2, y2) {
-		super(
-			x1 ?? inf,
-			y1 ?? inf,
-			x2 ?? -inf,
-			y2 ?? -inf
-		)
-	}
-
-	reset() {
-		this[0] =  inf
-		this[1] =  inf
-		this[2] = -inf
-		this[3] = -inf
-		return this
-	}
-
-	add_bbox2(x1, y1, x2, y2) {
-		this[0] = min(this[0], x1, x2)
-		this[1] = min(this[1], y1, y2)
-		this[2] = max(this[2], x1, x2)
-		this[3] = max(this[3], y1, y2)
-		return this
-	}
-
-	add_point(x, y) {
-		this[0] = min(this[0], x)
-		this[1] = min(this[1], y)
-		this[2] = max(this[2], x)
-		this[3] = max(this[3], y)
-		return this
-	}
-
-	add_points(ps) {
-		for (let [x, y] of ps)
-			this.add_point(x, y)
-		return this
-	}
-
-	rotate(a) {
-		if (!a)
-			return
-		let [x1, y1, x2, y2] = this
-		let cx = (x2 + x1) / 2
-		let cy = (y2 + y1) / 2
-		let [p1x, p1y] = rotate_point(x1, y1, cx, cy, a)
-		let [p2x, p2y] = rotate_point(x1, y2, cx, cy, a)
-		let [p3x, p3y] = rotate_point(x2, y1, cx, cy, a)
-		let [p4x, p4y] = rotate_point(x2, y2, cx, cy, a)
-		this.reset()
-		this.add_point(p1x, p1y)
-		this.add_point(p2x, p2y)
-		this.add_point(p3x, p3y)
-		this.add_point(p4x, p4y)
-		return this
-	}
-
-	inside_bbox2(px1, py1, px2, py2) {
-		let [cx1, cy1, cx2, cy2] = this
-		return cx1 >= px1 && cx2 <= px2 && cy1 >= py1 && cy2 <= py2
-	}
-
-	hit(x, y) {
-		let [x1, y1, x2, y2] = this
-		return x >= x1 && x <= x2 && y >= y1 && y <= y2
-	}
-
-}
-
-bbox2_class.prototype.is_bbox2 = true
-
-function bbox2(x1, y1, x2, y2) { return new bbox2_class(x1, y1, x2, y2) }
-
-// polygon offseting algorithm -----------------------------------------------
-
-// parallel line segment at a distance on the right side of a segment.
-// use a negative distance for the left side, or reflect the returned points
-// against their respective initial points.
-function line_offset(d, x1, y1, x2, y2) {
-	// normal vector of the same length as original segment.
-	let dx = -(y2-y1)
-	let dy =   x2-x1
-	let k = d / distance(x1, y1, x2, y2) // normal vector scale factor
-	// normal vector scaled and translated to (x1,y1) and (x2,y2)
-	out[0] = x1 + dx * k
-	out[1] = y1 + dy * k
-	out[2] = x2 + dx * k
-	out[3] = y2 + dy * k
-	return out
-}
-
-// evaluate a line at time t using linear interpolation.
-// the time between 0..1 covers the segment interval.
-function line_point(t, x1, y1, x2, y2) {
-	out[0] = x1 + t * (x2 - x1)
-	out[1] = y1 + t * (y2 - y1)
-	return out
-}
-
-// intersect line segment (x1, y1, x2, y2) with line segment (x3, y3, x4, y4).
-// returns the time on the first line where intersection occurs.
-// if the intersection occurs outside the segments themselves, then t is
-// outside the 0..1 range. if the lines are parallel then t is +/-inf.
-// if they are coincidental, t is NaN.
-function line_line_intersection(x1, y1, x2, y2, x3, y3, x4, y4) {
-	let d = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1)
-	return ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / d
-}
-
-function set_seg_offset(p1, p2, d) {
-	for (let seg of p1.segs) {
-		if (seg[0] == p2) { // (p2,p1) right side offset
-			seg[-2] = d
-			return
-		} else if (seg[1] == p2) { // (p1,p2) right side offset
-			seg[-1] = d
-			return
-		}
-	}
-	// TODO: see why this breaks
-	///assert(false, '#'+p1.segs.length)
-}
-
-// TODO: implement fast path for axis-aligned segments.
-function offset_corner(p0, p1, p2, d) {
-	set_seg_offset(p0, p1, d)
-	set_seg_offset(p1, p2, d)
-	p0.max_offset = max(p0.max_offset, abs(d))
-	p1.max_offset = max(p1.max_offset, abs(d))
-	p2.max_offset = max(p2.max_offset, abs(d))
-	let [x1, y1, x2, y2] = line_offset( d, p0[0], p0[1], p1[0], p1[1])
-	let [x3, y3, x4, y4] = line_offset(-d, p2[0], p2[1], p1[0], p1[1])
-	let t1 = line_line_intersection(x1, y1, x2, y2, x3, y3, x4, y4)
-	if (abs(t1) == inf) { // 0-degree corner: make a line cap of 2 points, 1*d thick
-		let dx = x2 == x4 ? d * sign(x1 - x2) : 0
-		let dy = y2 == y4 ? d * sign(y1 - y2) : 0
-		out[0] = x2 + dx
-		out[1] = y2 + dy
-		out[2] = x4 + dx
-		out[3] = y4 + dy
-	} else if (t1 != t1) { // 180-degree corner: use the offset point on the first line
-		out[0] = x2
-		out[1] = y2
-		out[2] = null
-		out[3] = null
-	} else { // bent corner
-		out[2] = null
-		out[3] = null
-		if (x1 == x2 && y3 == y4 || y1 == y2 && x3 == x4) { // axis-aligned and _|_ to each other
-			let t1s = -sign(t1-1) // branchless version of t1 < 1 ? 1 : -1
-			out[0] = x2 + d * sign(x2 - x1) * t1s
-			out[1] = y2 + d * sign(y2 - y1) * t1s
-		} else {
-			line_point(t1, x1, y1, x2, y2)
-		}
-	}
-	return out
-}
-
-function poly_offset(ps, d, ops) {
-	// remove null segments as we can't offset those (they don't have a normal).
-	let ps1 = ps
-	ps = []
-	for (let i = 0, n = ps1.length; i < n; i++) {
-		let p0 = ps1[mod(i-1, n)]
-		let p1 = ps1[i]
-		if (!points_near(p0, p1))
-			ps.push(p1)
-	}
-
-	ops.length = 0
-	if (ps.length == 1) { // single null seg: make a square
-		let ci = 0
-		for (let op of [[-d, -d], [d, -d], [d, d], [-d, d]]) {
-			op[0] += ps[0][0]
-			op[1] += ps[0][1]
-			op.p = ps[0]
-			op.d = d
-			op.ci = ci++
-			ops.push(op)
-		}
-	} else {
-		let ci = 0
-		for (let i = 0, n = ps.length; i < n; i++) {
-			let p1 = ps[i]
-			let i0 = i-1
-			let i2 = i+1
-			let p0 = ps[mod(i0--, n)]
-			let p2 = ps[mod(i2++, n)]
-			let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d)
-			let [x0, y0] = p1
-			let op1 = [x1, y1]
-			op1.p = p1
-			op1.d = d
-			op1.ci = ci++
-			ops.push(op1)
-			if (x2 != null) {
-				let op2 = [x2, y2]
-				op2.p = p1
-				op2.d = d
-				op2.ci = ci++
-				ops.push(op2)
-			}
-		}
-	}
-	return ops
-}
-
-// poly class ----------------------------------------------------------------
-
-// closed polygon with filaments used for representing the base cycles of a planar graph.
-// it can have holes in the `holes` property.
-
-let poly_class = class poly extends Array {
-
-	compute_center() {
-		let [x0, y0] = this[0]
-		let twicearea = 0
-		let x = 0
-		let y = 0
-		for (let i = 0, n = this.length, j = n-1; i < n; j = i++) {
-			let [x1, y1] = this[i]
-			let [x2, y2] = this[j]
-			let f = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
-			twicearea += f
-			x += (x1 + x2 - 2 * x0) * f
-			y += (y1 + y2 - 2 * y0) * f
-		}
-		let f = twicearea * 3
-		out[0] = x / f + x0
-		out[1] = y / f + y0
-		return out
-	}
-
-	compute_area() {
-		let area = 0
-		for (let i = 1, n = this.length; i <= n; i++)
-			area += this[mod(i, n)][0] * (this[mod(i+1, n)][1] - this[i-1][1])
-		return area / 2
-	}
-
-	compute_bbox(bb) {
-		for (let p of this)
-			bb.add_point(p[0], p[1])
-		return bb
-	}
-
-	// TODO: remove or ignore filaments
-	hit(x, y) {
-		let inside = false
-		for (let i = 0, j = this.length - 1; i < this.length; j = i++) {
-			let xi = this[i][0]
-			let yi = this[i][1]
-			let xj = this[j][0]
-			let yj = this[j][1]
-			let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
-			if (intersect)
-				inside = !inside
-		}
-		return inside
-	}
-
-	offset(d, out) {
-		return poly_offset(this, d, out ?? new poly_class())
-	}
-
-	update() {
-		if (this.center) {
-			if (!isarray(this.center))
-				this.center = []
-			this.compute_center(this.center)
-		}
-		if (this.bb) {
-			if (!this.bb.is_bbox2)
-				this.bb = bbox2()
-			this.compute_bbox(this.bb)
-		}
-		if (this.area != null)
-			this.area = abs(this.compute_area())
-	}
-
-}
-
-poly_class.prototype.is_poly = true
-
-function poly(...args) { return new poly_class(...args) }
 
 // cycle base extaction algorihm ---------------------------------------------
 //
@@ -459,8 +144,15 @@ function next_adj(p0, p, clockwise, max_a) {
 	return min_p
 }
 
+function poly_get_point(i, out) {
+	out[0] = this[i][0]
+	out[1] = this[i][1]
+	return out
+}
+
 function closed_walk(first, outer_cycle) {
 	let walk = poly()
+	walk.get_point = poly_get_point
 	let curr = first
 	let prev
 	do {
@@ -795,7 +487,7 @@ function plane_graph(e) {
 	}
 
 	function remove_null_segs() {
-		rem_segs(seg => points_near(seg[0], seg[1]), 'null segs')
+		rem_segs(seg => v2_near(seg[0], seg[1]), 'null segs')
 	}
 
 	function remove_angled_segs() {
@@ -883,7 +575,7 @@ function plane_graph(e) {
 		let p0
 		for (let i = 0; i < ps.length; i++) {
 			let p = ps[i]
-			if (p0 && points_near(p, p0)) {
+			if (p0 && v2_near(p, p0)) {
 				for (let j = 0; j < p.segs.length; j++) { // each connected seg
 					let seg = p.segs[j]
 					for (let i = 0; i < 2; i++) // each seg end
@@ -1004,7 +696,7 @@ function plane_graph(e) {
 	// finding which components are inside islands ----------------------------
 
 	function is_comp_inside_poly(c, poly) { // comp inside poly check
-		if (!c.bb.inside_bbox2(...poly.bb))
+		if (!c.bb.inside_bbox2(...poly.bbox()))
 			return false
 		return poly.hit(c.ps[0][0], c.ps[0][1])
 	}
@@ -1014,7 +706,7 @@ function plane_graph(e) {
 	}
 
 	function is_comp_inside_cycle(co, cy) { // comp inside cycle check
-		return is_comp_inside_poly(co, cy, cy.bb)
+		return is_comp_inside_poly(co, cy, cy.bbox())
 	}
 
 	// NOTE: O(n^2)
@@ -1036,7 +728,7 @@ function plane_graph(e) {
 			c.islands.length = 0
 			c.bb = bbox2()
 			for (let cy of c.cycles)
-				c.bb.add_bbox2(...cy.bb)
+				c.bb.add_bbox2(...cy.bbox())
 		}
 
 		// set inside flag with O(n^2) in order to lower the n for the O(n^4) loop below.
@@ -1084,11 +776,8 @@ function plane_graph(e) {
 	// finding the cycle base -------------------------------------------------
 
 	function init_cycle(c) {
-		c.bb = true
-		c.center = true
-		c.update()
 		c.i = gen_id('cycle')
-		c.area_pos = [...c.center]
+		c.area_pos = [...c.center()]
 	}
 
 	function extract_cycles() {
@@ -1120,7 +809,7 @@ function plane_graph(e) {
 	function hit_cycle(x, y, c) {
 		if (c.outer)
 			return
-		if (!c.edges.bb.hit(x, y))
+		if (!c.edges.bbox().hit(x, y))
 			return
 		for (let icomp of c.islands) {
 			for (let c1 of icomp.cycles) {
@@ -1184,10 +873,6 @@ function plane_graph(e) {
 
 // publishing ----------------------------------------------------------------
 
-G.bbox2 = bbox2
-G.poly = poly
-G.line_point = line_point
-G.line_offset = line_offset
 G.plane_graph = plane_graph
 
 }()) // module scope.

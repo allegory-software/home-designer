@@ -1,22 +1,32 @@
 <!DOCTYPE html>
 <html theme=dark>
-<body>
+<head>
 <base href="www2/">
+<link rel="icon" href="../www/favicon1.ico">
 <link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
-<script src=glue.js global></script>
-<script src=../www/2d.js></script>
-<script src=../www/3d.js></script>
-<script src=../www/earcut.js></script>
+</head>
+<body>
+<script src=glue.js global extend></script>
 <script src=ui.js></script>
 <script src=ui_validation.js></script>
 <script src=ui_nav.js></script>
 <script src=ui_grid.js></script>
+<script src=../www/earcut.js></script>
+<script src=../www/3d.js global></script>
+<script src=../www/2d.js></script>
+<script src=../www/gl.js></script>
+<script src=../www/gl-renderer.js></script>
+<script src=../www/model3.js></script>
+<script src=../www/suncalc.js></script>
+<script src=../www/modeleditor.js></script>
 <script>
 
 (function () {
 "use strict"
 const G = window
+
+let out = []
 
 DEBUG('DEBUG_PLAN')
 
@@ -92,6 +102,12 @@ let defaults = {
 	ext_wall_thickness: 18,
 }
 
+function poly_get_point(i, out) {
+	out[0] = this[i][0]
+	out[1] = this[i][1]
+	return out
+}
+
 function house(house) {
 
 	for (let k in defaults)
@@ -152,12 +168,12 @@ function house(house) {
 			for (let c of comp.cycles) {
 				if (c.outer)
 					continue
-				let a0 = c.edges.area
+				let a0 = c.edges.area()
 				for (let icomp of c.islands) {
 					fix_areas_for(icomp)
-					c.edges.area -= icomp.outer_cycle.edges.area
+					c.edges._area -= icomp.outer_cycle.edges.area()
 				}
-				let a1 = c.edges.area
+				let a1 = c.edges.area()
 				if (0 && a1 != a0)
 					log('cycle', c.i, 'area fixed:', a1, '+', a0-a1, '=', a0)
 			}
@@ -175,11 +191,9 @@ function house(house) {
 
 			for (let comp of comps) {
 				for (let c of comp.cycles) {
-
-					c.edges = c.offset((c.outer ? (c.comp.inside ? -o_int : -o_ext) : -o_int))
-					c.edges.bb = true
-					c.edges.area = true
-					c.edges.update()
+					let edges = poly2()
+					edges.get_point = poly_get_point
+					c.edges = c.offset(c.outer ? (c.comp.inside ? -o_int : -o_ext) : -o_int, edges)
 				}
 			}
 
@@ -189,7 +203,7 @@ function house(house) {
 			// compute the level plan bbox now that we have outer skins.
 			floor.bb.reset()
 			for (let co of comps)
-				floor.bb.add_bbox2(...co.outer_cycle.edges.bb)
+				floor.bb.add_bbox2(...co.outer_cycle.edges.bbox())
 
 			// recompute house plan bbox.
 			if (house.bb) // not in init
@@ -222,12 +236,8 @@ function house(house) {
 			return gable_roof_height_at(m, roof)
 		}
 
-		function find_point(x, y) {
-			for (let p of ps) {
-				let [x1, y1] = p
-				if (x1 == x && y1 == y)
-					return p
-			}
+		function roof_section() {
+
 		}
 
 		function init_roofs() {
@@ -236,40 +246,7 @@ function house(house) {
 			push_log('init roofs')
 
 			for (let roof of roofs) {
-
-				// find the segs that the roof ridge cuts.
-				/*
-				let v = roof_ridge_is_v(roof)
-				let A1 = v ? 1 : 0
-				let a1 = roof.bb[A1]
-				let a2 = roof.bb[A1+2]
-				let m = gable_roof_ridge_axis(roof)
-				for (let seg of segs) {
-					if (is_v(seg) == v)
-						continue
-					let sa = seg_axis(seg)
-					if (sa != a1 && sa != a2)
-						continue
-					let sm1 = seg_m1(seg)
-					let sm2 = seg_m2(seg)
-					if (m < sm1 || m > sm2)
-						continue
-					split_seg_at(seg, m)
-					break
-				}
-				*/
-
-				let ps = []
-				for (let p of words(roof.points)) {
-					p = floor.point_ref(p)
-					ps.push(p)
-				}
-				roof.points = ps
-
-				roof.bb = bbox2()
-				for (let p of roof.points)
-					roof.bb.add_point(p[0], p[1])
-
+				roof.box = bbox2(...roof.box)
 				fix_roof(roof)
 			}
 
@@ -277,21 +254,14 @@ function house(house) {
 		}
 
 		function fix_roof(roof) {
-			let h = 0
-			for (let p of roof.points) {
-				p.h = gable_roof_height_at_point(p[0], p[1], roof)
-				h = max(h, p.h)
-			}
-			return h
+			//
 		}
 
 		function fix_roofs() {
 			if (!roofs)
 				return
-			let h = 0
 			for (let roof of roofs)
-				h = max(h, fix_roof(roof))
-			floor.h = floor.fixed_h + h
+				fix_roof(roof)
 		}
 
 		// plan view UI ops ----------------------------------------------------
@@ -875,7 +845,7 @@ function house(house) {
 						let x2 = ep_m(ep2)
 						let y11 = y1 - ep_h(ep1)
 						let y12 = y1 - ep_h(ep2)
-						pr(face_i, floor.i, x1, x2, ep_h(ep1), ep_h(ep2))
+						// pr(face_i, floor.i, x1, x2, ep_h(ep1), ep_h(ep2))
 						add_seg(x1, y11, x1, y2, ep1, ep2, 'vertical of floor', floor.i)
 						add_seg(x2, y12, x2, y2, ep1, ep2, 'vertical of floor', floor.i)
 
@@ -1232,7 +1202,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	// left arrow
 	let [x1a1, y1a1] = point_around(x1, y1, 8, a + 45*rad)
 	let [x1a2, y1a2] = point_around(x1, y1, 8, a - 45*rad)
-	let [x1e, y1e] = line_point(t1, x1, y1, x2, y2)
+	let [x1e, y1e] = line2.at(t1, x1, y1, x2, y2, out)
 
 	cx.moveTo(x1  , y1)
 	cx.lineTo(x1a1, y1a1)
@@ -1244,7 +1214,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	// right arrow
 	let [x2a1, y2a1] = point_around(x2, y2, 8, a + (90+45)*rad)
 	let [x2a2, y2a2] = point_around(x2, y2, 8, a - (90+45)*rad)
-	let [x2e, y2e] = line_point(t2, x1, y1, x2, y2)
+	let [x2e, y2e] = line2.at(t2, x1, y1, x2, y2, out)
 	cx.moveTo(x2  , y2)
 	cx.lineTo(x2a1, y2a1)
 	cx.moveTo(x2  , y2)
@@ -1255,7 +1225,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 	cx.strokeStyle = ui.fg_color('text')
 	cx.stroke()
 
-	let [xc, yc] = line_point(.5, x1, y1, x2, y2)
+	let [xc, yc] = line2.at(.5, x1, y1, x2, y2, out)
 	cx.translate(xc, yc)
 	cx.rotate(a)
 	let tx = round(-w / 2)
@@ -1611,7 +1581,7 @@ ui.box_widget('floor_view', {
 					x = sg.x(x)
 					y = sg.y(y)
 					cx.fillStyle = ui.fg_color('label')
-					let s = format_area(c.edges.area)
+					let s = format_area(c.edges.area())
 					if (DEBUG_PLAN) s = co.i + '/' + c.i + ' ' + s
 					cx.fillText(s, x, y+5)
 				}
@@ -1625,7 +1595,7 @@ ui.box_widget('floor_view', {
 				let y1 = ep1[1]
 				let x2 = ep2[0]
 				let y2 = ep2[1]
-				;[x1, y1, x2, y2] = line_offset(-10, x1, y1, x2, y2, [])
+				;[x1, y1, x2, y2] = line2.offset(-10, x1, y1, x2, y2, [])
 				draw_length(cx, sg, x1, y1, x2, y2)
 			}
 		}
@@ -2238,7 +2208,7 @@ ui.box_widget('roof_plan_view', {
 					x = sg.x(x)
 					y = sg.y(y)
 					cx.fillStyle = ui.fg_color('label')
-					let s = format_area(c.edges.area)
+					let s = format_area(c.edges.area())
 					if (DEBUG_PLAN) s = co.i + '/' + c.i + ' ' + s
 					cx.fillText(s, x, y+5)
 				}
@@ -2774,9 +2744,7 @@ G.test_plan = house({
 			],
 
 			roofs: [
-				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', points: [
-					[0,600],[600,600],[600,800],[600,1000],[0,1000],[0,800],
-				]},
+				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 200, box: [0,600,600,1000]},
 			],
 
 		},
@@ -2791,33 +2759,15 @@ G.test_plan = house({
 	floors: [
 		{
 			points: [
-				// [200,200, 'tl'],
-				// [800,200, 'tr'],
-				// [200,400, 'bl'],
-				// [800,400, 'br'],
-				// [200,300, 'cl'],
-				// [800,300, 'cr'],
+				[200,  0, 'cl'],
+				[200,400, 'cr'],
 			],
 			lines: [
-				['draw','tl',200,200,'tr',600,'cr',200,0,'br',200,'bl',-600,'cl',-200,0,'tl',-200],
-				// ['connect',],
+				['draw',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+				['connect','cl','cr'],
 			],
-			// runs: [
-			// 	[
-			// 		[200,200],[800,200],[800,400],[800,600],
-			// 		[200,600],
-			// 		[200,200],
-			// 	],
-			// ],
-			//],
-				// [[200,200],[800,200]],
-				// //[[800,200],[800,400]],
-				// [[800,200],[800,600]],
-				// [[800,600],[200,600]],
-				// [[200,600],[200,200]],
-			//],
 			roofs: [
-				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', points: 'tl tr cr br bl cl tl'},
+				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 200, box: [0,0,600,400]},
 			],
 		},
 	],
@@ -2842,7 +2792,7 @@ ui.main = function() {
 
 		ui.h()
 
-			ui.v(3)
+			ui.v()
 
 				ui.h()
 
@@ -2872,6 +2822,9 @@ ui.main = function() {
 
 			ui.end_v()
 
+			ui.modeleditor('test_medit', test_plan)
+
+			if (0) {
 			ui.v()
 
 				for (let face of test_plan.faces) {
@@ -2883,6 +2836,7 @@ ui.main = function() {
 				}
 
 			ui.end_v()
+			}
 
 		ui.end_h()
 

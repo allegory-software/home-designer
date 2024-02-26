@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html theme=dark>
+<body>
+<base href="www2/">
+<link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
+<script src=glue.js global></script>
+<script src=../www/2d.js></script>
+<script src=../www/3d.js></script>
+<script src=../www/earcut.js></script>
+<script src=ui.js></script>
+<script src=ui_validation.js></script>
+<script src=ui_nav.js></script>
+<script src=ui_grid.js></script>
+<script>
+
+(function () {
+"use strict"
+const G = window
+
+let S = ui.S
+
+let pitch = 30*rad
+let oy = 500
+let ry = -200
+let rx = 200
+let x1 = 100
+let x2 = 400
+
+function project(x, side) {
+	let a = side == 'r' ? -pitch : pitch + PI
+	let [rx2, ry2] = point_around(rx, ry, 1, a)
+	let t = line_line_intersection(x, 0, x, -1, rx, ry, rx2, ry2)
+	return line_point(t, x, 0, x, -1)
+}
+
+ui.box_widget('test', {
+
+	create: function(cmd, fr, align, valign, min_w, min_h) {
+
+		let [dstate, dx, dy] = ui.drag('test')
+
+		let [x, y] = ui.drag_point('d1', rx, oy + ry)
+		rx = x
+		ry = y - oy
+		project(x1, 'l')
+
+		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h)
+	},
+
+	draw: function(a, i) {
+
+		let x  = a[i+0]
+		let y  = a[i+1]
+		let w  = a[i+2]
+		let h  = a[i+3]
+
+		let cx = ui.cx
+
+		cx.save()
+
+		cx.beginPath()
+
+		cx.translate(0, oy)
+
+		cx.strokeStyle = ui.fg_color('text')
+
+		// bottom plate
+		cx.moveTo(x1, 0)
+		cx.lineTo(x2, 0)
+		cx.stroke()
+
+		// roof lines
+		cx.moveTo(rx, ry); cx.lineTo(...project(x1, 'l'))
+		cx.moveTo(rx, ry); cx.lineTo(...project(x2, 'r'))
+
+		// walls
+		cx.moveTo(x1, 0); cx.lineTo(...project(x1, 'l'))
+		cx.moveTo(x2, 0); cx.lineTo(...project(x2, 'r'))
+
+		cx.stroke()
+
+		cx.restore()
+	},
+
+	hit: function(a, i) {
+
+		let x00  = a[i+0]
+		let y00  = a[i+1]
+		let w    = a[i+2]
+		let h    = a[i+3]
+
+		return
+
+	},
+
+})
+
+ui.main = function() {
+
+	ui.test()
+
+}
+
+}()) // module function
+
+</script>
+</body>
+</html>

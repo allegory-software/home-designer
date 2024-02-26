@@ -161,14 +161,14 @@ gl.scene_renderer = function(r) {
 
 	let gl = this
 
-	r = r || {}
+	r ??= {}
 
-	r.background_color = r.background_color || v4(1, 1, 1, 1)
-	r.sunlight_dir     = r.sunlight_dir || v3(0, 1, 0)
-	r.sunlight_color   = r.sunlight_color || v3(1, 1, 1)
-	r.ambient_strength = or(r.ambient_strength, 0.3)
+	r.background_color = r.background_color ?? v4(1, 1, 1, 1)
+	r.sunlight_dir     = r.sunlight_dir     ?? v3(0, 1, 0)
+	r.sunlight_color   = r.sunlight_color   ?? v3(1, 1, 1)
+	r.ambient_strength = r.ambient_strength ?? 0.3
 
-	r.show_back_faces  = or(r.show_back_faces, false)
+	r.show_back_faces  = r.show_back_faces ?? false
 
 	let globals_ubo = gl.ubo('globals')
 	globals_ubo.bind()
@@ -232,7 +232,7 @@ gl.scene_renderer = function(r) {
 			sdm_prog.set_uni('sdm_view_proj', sdm_view_proj)
 			sdm_prog.unuse()
 
-			let sdm_res1 = or(r.shadow_map_resolution, 1024 * 4)
+			let sdm_res1 = r.shadow_map_resolution ?? 1024 * 4
 			if (sdm_res1 != sdm_res) {
 				sdm_res = sdm_res1
 
@@ -574,9 +574,9 @@ gl.faces_renderer = function() {
 			vao.set_attr('model'    , e.model)
 			vao.set_attr('disabled' , e.disabled)
 			for (let [mat, offset, len] of draw_ranges) {
-				prog.set_uni('specular_strength' , or(mat.specular_strength, e.specular_strength))
-				prog.set_uni('shininess'         , 1 << or(mat.shininess, e.shininess)) // keep this a pow2.
-				prog.set_uni('diffuse_color'     , or(mat.diffuse_color, e.diffuse_color))
+				prog.set_uni('specular_strength' , mat.specular_strength ?? e.specular_strength)
+				prog.set_uni('shininess'         , 1 << (mat.shininess ?? e.shininess)) // keep this a pow2.
+				prog.set_uni('diffuse_color'     , mat.diffuse_color ?? e.diffuse_color)
 				prog.set_uni('diffuse_map'       , mat.diffuse_map)
 				gl.draw_triangles(offset, len)
 			}
@@ -593,12 +593,12 @@ gl.faces_renderer = function() {
 
 // solid lines rendering -----------------------------------------------------
 
-gl.solid_lines_renderer = function() {
+gl.solid_lines_renderer = function(e) {
 
 	let gl = this
-	let e = {
+	e = assign({
 		base_color: 0x000000,
-	}
+	}, e)
 
 	let prog = this.program('solid_line', `
 
@@ -1098,13 +1098,13 @@ gl.skybox = function(opt) {
 		prog.set_uni('sky_color'     , e.sky_color || 0xccddff)
 		prog.set_uni('horizon_color' , e.horizon_color || 0xffffff)
 		prog.set_uni('ground_color'  , e.ground_color || 0xe0dddd)
-		prog.set_uni('exponent'      , or(e.exponent, 1))
+		prog.set_uni('exponent'      , e.exponent ?? 1)
 
 		let n_loaded
 		let on_load = function() {
 			n_loaded++
 			if (n_loaded == 6) {
-				e.fire('load')
+				e.dispatchEvent(new Event('load'))
 			}
 		}
 		if (e.images && !e.loaded) {

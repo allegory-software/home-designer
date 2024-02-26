@@ -1,13 +1,30 @@
 /*
 
-	3D math lib.
+	3D and 2D math lib.
 	Written by Cosmin Apreutesei. Public Domain.
 
 	Code adapted from three.js and glMatrix, MIT License.
 
+LOADING
+
+	<script src=3d.js [global]>
+
+		the global flag dumps the `Math3D` namespace into `window`.
+
+API
+
+	bbox2([x1, y1, x2, y2]) -> bbox2
+		add(x, y | p | bbox2 | [p1,...]) -> bbox2
+		add_point(x, y) -> bbox2
+		add_bbox2(x1, y1, x2, y2) -> bbox2
+		reset() -> bbox2
+		rotate(a) -> bbox2
+		inside_bbox2(x1, y1, x2, y2) -> t|f
+		hit(x, y) contains_point(p)
+
 	v2 [x, y]
 		* add sub mul div
-		set(x,y|v2|v3|v4) assign to sets clone equals from[_v2|_v3|_v4]_array to[_v2]_array
+		set(x,y|v2|v3|v4) assign to sets clone equals near from[_v2|_v3|_v4]_array to[_v2]_array
 		len[2] set_len normalize
 		add adds sub subs negate mul muls div divs min max dot
 		distance[2]_to
@@ -16,7 +33,7 @@
 
 	v3 [x, y, z]
 		* add sub mul div cross zero one
-		set(x,y,z|v2,z|v3|v4|mat4) assign to sets clone equals
+		set(x,y,z|v2,z|v3|v4|mat4) assign to sets clone equals near
 		from[_v3|_v4]_array to[_v3]_array from_rgb from_rgba from_hsl
 		len[2] set_len normalize
 		add adds sub subs negate mul muls div divs min max dot cross
@@ -45,7 +62,7 @@
 		mul premul muls scale set_position translate rotate
 		frustum perspective ortho look_to compose rotation
 
-	quat [x, y, z, w]
+	quat[3] [x, y, z, w]
 		set assign to reset clone equals from[_quat]_array to[_quat]_array
 		set_from_axis_angle set_from_rotation_matrix set_from_unit_vectors
 		len[2] normalize rotate_towards conjugate invert
@@ -53,23 +70,42 @@
 
 	plane[3] {constant:, normal:}
 		set assign to clone equals
-		set_from_normal_and_coplanar_point set_from_coplanar_points set_from_poly
+		set_from_normal_and_coplanar_point set_from_coplanar_points set_from_poly3
 		normalize negate
 		distance_to_point project_point
-		intersect_line intersects_line clip_line
+		intersect_line intersects_line clip_line intersect_plane
 		origin translate transform
+
+	triangle2 [a, b, c]
+		* hit
+		set assign to clone equals from[_triangle2]_array to[_triangle2]_array
+		area midpoint hit contains_point
 
 	triangle3 [a, b, c]
 		* normal barycoord contains_point uv is_front_facing
 		set assign to clone equals from[_triangle3]_array to[_triangle3]_array
 		area midpoint normal plane barycoord uv contains_point is_front_facing
 
+	poly[2] [pi1, ..., hole1_pi1, hole1_pi2, ..., points: [p1,...], holes: [hole1_pi1, hole2_pi1, ...]]
+		% point_count get_point invalidate
+		plane xy_quat is_convex is_convex_quad triangle_count triangles triangle2 triangle3
+		center bbox area
+		hit contains_point
+		uv_at
+		subclass
+
 	poly3
-		% point_count get_point
-		plane xy_quat is_convex_quad triangle_count triangles triangle contains_point
+		get_point2 get_point3
+
+	line2 [p0, p1]
+		* intersect_line intersects_line offset
+		set(line | p1,p2) assign to clone equals near to|from[_line2]_array
+		delta distance2 distance at reverse len set_len
+		closest_point_to_point_t closest_point_to_point intersect_line intersects_line
+		transform
 
 	line3 [p0, p1]
-		set(line | p1,p2) assign to clone equals to|from[_line3]_array
+		set(line | p1,p2) assign to clone equals near to|from[_line3]_array
 		delta distance2 distance at reverse len set_len
 		closest_point_to_point_t closest_point_to_point intersect_line intersect_plane intersects_plane
 		transform
@@ -88,9 +124,32 @@
 */
 
 (function() {
+"use strict"
+const G = window
 
-NEAR = 1e-5 // distance epsilon (tolerance)
-FAR  = 1e5  // skybox distance from center
+const {
+	inf,
+	mod,
+} = glue
+
+let NEAR = 1e-5 // distance epsilon (tolerance)
+let FAR  = 1e5  // skybox distance from center
+
+function near(a, b) { return abs(a - b) < NEAR }
+
+let near_angle = near
+
+let out = []
+
+function rotate_point(px, py, cx, cy, angle, out) {
+	let s = sin(angle)
+	let c = cos(angle)
+	let x = px - cx
+	let y = py - cy
+	out[0] = cx + (x * c - y * s)
+	out[1] = cy + (x * s + y * c)
+	return out
+}
 
 // v2 ------------------------------------------------------------------------
 
@@ -134,6 +193,13 @@ let v2_class = class v extends Array {
 		return (
 			v[0] === this[0] &&
 			v[1] === this[1]
+		)
+	}
+
+	near(v) {
+		return (
+			near(v[0], this[0]) &&
+			near(v[1], this[1])
 		)
 	}
 
@@ -290,36 +356,47 @@ v2_class.prototype.is_v2 = true
 property(v2_class, 'x', function() { return this[0] }, function(v) { this[0] = v })
 property(v2_class, 'y', function() { return this[1] }, function(v) { this[1] = v })
 
-v2 = function v2(x, y) { return new v2_class(x, y) }
+let v2 = function v2(x, y) { return new v2_class(x, y) }
 v2.class = v2_class
 
-v2.add = function add(a, b, s, out) {
+v2.add = function v2add(a, b, s, out) {
 	s = s ?? 1
 	out[0] = (a[0] + b[0]) * s
 	out[1] = (a[1] + b[1]) * s
 	return out
 }
 
-v2.sub = function sub(a, b, out) {
+v2.sub = function v2sub(a, b, out) {
 	out[0] = a[0] - b[0]
 	out[1] = a[1] - b[1]
 	return out
 }
 
-v2.mul = function mul(a, b, out) {
+v2.mul = function v2mul(a, b, out) {
 	out[0] = a[0] * b[0]
 	out[1] = a[1] * b[1]
 	return out
 }
 
-v2.div = function div(a, b, out) {
+v2.div = function v2div(a, b, out) {
 	out[0] = a[0] / b[0]
 	out[1] = a[1] / b[1]
 	return out
 }
 
+v2.near = function v2near(p1, p2) {
+	return (
+		near(p1[0], p2[0]) &&
+		near(p1[1], p2[1])
+	)
+}
+
 v2.origin = v2()
 v2.zero = v2.origin
+
+// temporaries for line2 and poly methods.
+let _v2_0 = v2()
+let _v2_1 = v2()
 
 // v3 ------------------------------------------------------------------------
 
@@ -401,6 +478,14 @@ let v3_class = class v extends Array {
 			v[0] === this[0] &&
 			v[1] === this[1] &&
 			v[2] === this[2]
+		)
+	}
+
+	near(v) {
+		return (
+			near(v[0], this[0]) &&
+			near(v[1], this[1]) &&
+			near(v[2], this[2])
 		)
 	}
 
@@ -634,7 +719,7 @@ property(v3_class, 'x', function() { return this[0] }, function(v) { this[0] = v
 property(v3_class, 'y', function() { return this[1] }, function(v) { this[1] = v })
 property(v3_class, 'z', function() { return this[2] }, function(v) { this[2] = v })
 
-v3 = function v3(x, y, z) { return new v3_class(x, y, z) }
+let v3 = function v3(x, y, z) { return new v3_class(x, y, z) }
 v3.class = v3_class
 
 v3.cross = function(a, b, out) {
@@ -650,7 +735,7 @@ v3.cross = function(a, b, out) {
 	return out
 }
 
-v3.add = function add(a, b, s, out) {
+v3.add = function v3add(a, b, s, out) {
 	s = s ?? 1
 	out[0] = a[0] + b[0] * s
 	out[1] = a[1] + b[1] * s
@@ -658,21 +743,21 @@ v3.add = function add(a, b, s, out) {
 	return out
 }
 
-v3.sub = function sub(a, b, out) {
+v3.sub = function v3sub(a, b, out) {
 	out[0] = a[0] - b[0]
 	out[1] = a[1] - b[1]
 	out[2] = a[2] - b[2]
 	return out
 }
 
-v3.mul = function mul(a, b, out) {
+v3.mul = function v3mul(a, b, out) {
 	out[0] = a[0] * b[0]
 	out[1] = a[1] * b[1]
 	out[2] = a[2] * b[2]
 	return out
 }
 
-v3.div = function div(a, b, out) {
+v3.div = function v3div(a, b, out) {
 	out[0] = a[0] / b[0]
 	out[1] = a[1] / b[1]
 	out[2] = a[2] / b[2]
@@ -945,10 +1030,10 @@ property(v4_class, 'y', function() { return this[1] }, function(v) { this[1] = v
 property(v4_class, 'z', function() { return this[2] }, function(v) { this[2] = v })
 property(v4_class, 'w', function() { return this[3] }, function(v) { this[3] = v })
 
-v4 = function v4(x, y, z, w) { return new v4_class(x, y, z, w) }
+let v4 = function v4(x, y, z, w) { return new v4_class(x, y, z, w) }
 v4.class = v4_class
 
-v4.add = function add(a, v, s, out) {
+v4.add = function v4add(a, v, s, out) {
 	s = s ?? 1
 	out[0] = a[0] + v[0] * s
 	out[1] = a[1] + v[1] * s
@@ -957,7 +1042,7 @@ v4.add = function add(a, v, s, out) {
 	return out
 }
 
-v4.sub = function sub(a, v, out) {
+v4.sub = function v4sub(a, v, out) {
 	out[0] = a[0] - v[0]
 	out[1] = a[1] - v[1]
 	out[2] = a[2] - v[2]
@@ -965,7 +1050,7 @@ v4.sub = function sub(a, v, out) {
 	return out
 }
 
-v4.mul = function mul(a, v, out) {
+v4.mul = function v4mul(a, v, out) {
 	out[0] = a[0] * v[0]
 	out[1] = a[1] * v[1]
 	out[2] = a[2] * v[2]
@@ -973,7 +1058,7 @@ v4.mul = function mul(a, v, out) {
 	return out
 }
 
-v4.div = function div(a, v, out) {
+v4.div = function v4div(a, v, out) {
 	out[0] = a[0] / v[0]
 	out[1] = a[1] / v[1]
 	out[2] = a[2] / v[2]
@@ -1202,7 +1287,7 @@ let mat3_type = function(super_class, super_args) {
 	let mat3 = function() { return new mat3_class() }
 	mat3.class = mat3_class
 
-	mat3.mul = function mul(a, b, out) {
+	mat3.mul = function mat3mul(a, b, out) {
 
 		let a11 = a[0]
 		let a21 = a[1]
@@ -1242,8 +1327,8 @@ let mat3_type = function(super_class, super_args) {
 }
 
 let mat3_ident = [1, 0, 0, 0, 1, 0, 0, 0, 1]
-mat3    = mat3_type(Array, mat3_ident)
-mat3f32 = mat3_type(f32arr, [mat3_ident])
+let mat3    = mat3_type(Array, mat3_ident)
+let mat3f32 = mat3_type(f32arr, [mat3_ident])
 
 mat3.identity = mat3()
 mat3f32.identity = mat3f32()
@@ -1753,7 +1838,7 @@ let mat4_type = function(super_class, super_args) {
 	let mat4 = function(elements) { return new mat4_class(elements) }
 	mat4.class = mat4_class
 
-	mat4.mul = function mul(a, b, out) {
+	mat4.mul = function mat4mul(a, b, out) {
 
 		let a11 = a[ 0]
 		let a21 = a[ 1]
@@ -1814,8 +1899,8 @@ let mat4_type = function(super_class, super_args) {
 }
 
 let mat4_ident = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
-mat4    = mat4_type(Array, mat4_ident)
-mat4f32 = mat4_type(f32arr, [mat4_ident])
+let mat4    = mat4_type(Array, mat4_ident)
+let mat4f32 = mat4_type(f32arr, [mat4_ident])
 
 mat4.identity = mat4()
 mat4f32.identity = mat4f32()
@@ -2087,12 +2172,12 @@ property(quat_class, 'y', function() { return this[1] }, function(v) { this[1] =
 property(quat_class, 'z', function() { return this[2] }, function(v) { this[2] = v })
 property(quat_class, 'w', function() { return this[3] }, function(v) { this[3] = v })
 
-quat = function(x, y, z, w) { return new quat_class(x, y, z, w) }
+let quat = function(x, y, z, w) { return new quat_class(x, y, z, w) }
 quat.class = quat_class
-quat3 = quat
+let quat3 = quat
 
 // from http://www.euclideanspace.com/maths/algebra/realNormedAlgebra/quaternions/code/index.htm
-quat.mul = function mul(a, b, out) {
+quat.mul = function quatmul(a, b, out) {
 	let qax = a[0]
 	let qay = a[1]
 	let qaz = a[2]
@@ -2165,11 +2250,11 @@ let plane_class = class plane {
 	}
 
 	// Newell's method.
-	set_from_poly(poly) {
+	set_from_poly3(poly) {
 		let n = poly.point_count()
 		assert(n >= 3)
 		let pn = _v1.set(0, 0, 0)
-		let p1 = poly.get_point(0, _v2)
+		let p1 = poly.get_point3(0, _v2)
 		for (let i = 1; i <= n; i++) {
 			let p2 = poly.get_point(i % n, _v3)
 			pn[0] += (p1[1] - p2[1]) * (p1[2] + p2[2])
@@ -2245,6 +2330,14 @@ let plane_class = class plane {
 		return line
 	}
 
+	// intersect two planes resulting in a direction vector.
+	intersect_plane(other, dir) {
+		dir.set(this.normal).cross(other.normal)
+		if (abs(dir.distance_to(v3.zero)) <= NEAR) // planes are parallel
+			return
+		return dir
+	}
+
 	// project the plane's normal at origin onto the plane.
 	origin(out) {
 		return out.set(this.normal).muls(-this.constant)
@@ -2267,20 +2360,20 @@ let plane_class = class plane {
 
 plane_class.prototype.is_plane = true
 
-plane = function(normal, constant) { return new plane_class(normal, constant) }
+let plane = function(normal, constant) { return new plane_class(normal, constant) }
 plane.class = plane_class
-plane3 = plane // so you can do `let plane = plane3()`.
+let plane3 = plane // so you can do `let plane = plane3()`.
 
-// triangle3 -----------------------------------------------------------------
+// triangle2 -----------------------------------------------------------------
 
-let triangle3_class = class triangle3 extends Array {
+let triangle2_class = class triangle3 extends Array {
 
 	constructor(a, b, c) {
-		super(a || v3(), b || v3(), c || v3())
+		super(a || v2(), b || v2(), c || v2())
 	}
 
 	set(a, b, c) {
-		if (a.is_triangle) {
+		if (a.is_triangle2) {
 			let t = a
 			this[0].set(t[0])
 			this[1].set(t[1])
@@ -2294,10 +2387,125 @@ let triangle3_class = class triangle3 extends Array {
 	}
 
 	assign(v) {
-		assert(v.is_triangle)
+		assert(v.is_triangle2)
 		let p0 = this[0]
-		let p1 = this[0]
-		let p2 = this[0]
+		let p1 = this[1]
+		let p2 = this[2]
+		assign(this, v)
+		this[0] = p0.assign(v[0])
+		this[1] = p1.assign(v[1])
+		this[2] = p2.assign(v[2])
+	}
+
+	to(v) {
+		return v.set(this)
+	}
+
+	clone() {
+		return new triangle2().set(this)
+	}
+
+	equals(t) {
+		return (
+			t[0].equals(this[0]) &&
+			t[1].equals(this[1]) &&
+			t[2].equals(this[2])
+		)
+	}
+
+	from_array(a, i) {
+		this[0][0] = a[i+0]
+		this[0][1] = a[i+1]
+		this[1][0] = a[i+2]
+		this[1][1] = a[i+3]
+		this[2][0] = a[i+4]
+		this[2][1] = a[i+5]
+		return this
+	}
+
+	to_array(a, i) {
+		a[i+0] = this[0][0]
+		a[i+1] = this[0][1]
+		a[i+3] = this[1][0]
+		a[i+4] = this[1][1]
+		a[i+6] = this[2][0]
+		a[i+7] = this[2][1]
+		return a
+	}
+
+	from_triangle2_array(a, i) { return this.from_array(a, 6 * i) }
+
+	to_triangle2_array(a, i) { return this.to_array(a, 6 * i) }
+
+	area() {
+		let [x1, y1] = this[0]
+		let [x2, y2] = this[1]
+		let [x3, y3] = this[2]
+		return .5 * abs(x1*y2 - x2*y1 + x2*y3 - x3*y2 + x3*y1 - x1*y3)
+	}
+
+	midpoint(out) {
+		let [x1, y1] = this[0]
+		let [x2, y2] = this[1]
+		let [x3, y3] = this[2]
+		out[0] = (x1 + x2 + x3) * (1/3)
+		out[1] = (y1 + y2 + y3) * (1/3)
+		return out
+	}
+
+	hit(x, y) {
+		return triangle2.hit(x, y, this[0], this[1], this[2])
+	}
+
+	contains_point(p) {
+		return triangle2.hit(p[0], p[1], this[0], this[1], this[2])
+	}
+
+}
+
+triangle2_class.prototype.is_triangle2 = true
+
+let triangle2 = function(a, b, c) { return new triangle2_class(a, b, c) }
+triangle2.class = triangle2_class
+
+triangle2.hit = function triangle2_hit(x, y, p1, p2, p3) {
+	let [x1, y1] = p1
+	let [x2, y2] = p2
+	let [x3, y3] = p3
+	let denom = ((y2 - y3)*(x1 - x3) + (x3 - x2)*(y1 - y3))
+	let a = ((y2 - y3)*(x - x3) + (x3 - x2)*(y - y3)) / denom
+	let b = ((y3 - y1)*(x - x3) + (x1 - x3)*(y - y3)) / denom
+	let c = 1 - a - b
+	return 0 <= a && a <= 1 && 0 <= b && b <= 1 && 0 <= c && c <= 1
+}
+
+// triangle3 -----------------------------------------------------------------
+
+let triangle3_class = class triangle3 extends Array {
+
+	constructor(a, b, c) {
+		super(a || v3(), b || v3(), c || v3())
+	}
+
+	set(a, b, c) {
+		if (a.is_triangle3) {
+			let t = a
+			this[0].set(t[0])
+			this[1].set(t[1])
+			this[2].set(t[2])
+		} else {
+			this[0].set(a)
+			this[1].set(b)
+			this[2].set(c)
+		}
+		return this
+	}
+
+	assign(v) {
+		assert(v.is_triangle3)
+		let p0 = this[0]
+		let p1 = this[1]
+		let p2 = this[2]
 		assign(this, v)
 		this[0] = p0.assign(v[0])
 		this[1] = p1.assign(v[1])
@@ -2388,10 +2596,10 @@ let triangle3_class = class triangle3 extends Array {
 
 triangle3_class.prototype.is_triangle3 = true
 
-triangle3 = function(a, b, c) { return new triangle3_class(a, b, c) }
+let triangle3 = function(a, b, c) { return new triangle3_class(a, b, c) }
 triangle3.class = triangle3_class
 
-triangle3.normal = function normal(a, b, c, out) {
+triangle3.normal = function tri3normal(a, b, c, out) {
 	out.set(c).sub(b)
 	_v0.set(a).sub(b)
 	out.cross(_v0)
@@ -2403,7 +2611,7 @@ triangle3.normal = function normal(a, b, c, out) {
 
 // static/instance method to calculate barycentric coordinates
 // http://www.blackpawn.com/texts/pointinpoly/default.html
-triangle3.barycoord = function barycoord(p, a, b, c, out) {
+triangle3.barycoord = function triangle3_barycoord(p, a, b, c, out) {
 	_v0.set(c).sub(a)
 	_v1.set(b).sub(a)
 	_v2.set(p).sub(a)
@@ -2421,14 +2629,14 @@ triangle3.barycoord = function barycoord(p, a, b, c, out) {
 	return out.set(1 - u - v, v, u)
 }
 
-triangle3.contains_point = function contains_point(p, a, b, c) {
+triangle3.contains_point = function triangle3_contains_point(p, a, b, c) {
 	let bc = this.barycoord(p, a, b, c, _v3)
 	let x = bc[0]
 	let y = bc[1]
 	return x >= 0 && y >= 0 && x + y <= 1
 }
 
-triangle3.uv = function uv(p, p1, p2, p3, uv1, uv2, uv3, out) {
+triangle3.uv = function triangle3_uv(p, p1, p2, p3, uv1, uv2, uv3, out) {
 	let bc = this.barycoord(p, p1, p2, p3, _v3)
 	out.set(0, 0)
 	out.add(uv1, bc[0])
@@ -2437,11 +2645,493 @@ triangle3.uv = function uv(p, p1, p2, p3, uv1, uv2, uv3, out) {
 	return out
 }
 
-triangle3.is_front_facing = function is_front_facing(a, b, c, direction) {
+triangle3.is_front_facing = function triangle3_is_front_facing(a, b, c, direction) {
 	let p = _v0.set(c).sub(b)
 	let q = _v1.set(a).sub(b) // strictly front facing
 	return p.cross(q).dot(direction) < 0
 }
+
+// polygon offseting algorithm -----------------------------------------------
+
+function set_seg_offset(p1, p2, d) {
+	for (let seg of p1.segs) {
+		if (seg[0] == p2) { // (p2,p1) right side offset
+			seg[-2] = d
+			return
+		} else if (seg[1] == p2) { // (p1,p2) right side offset
+			seg[-1] = d
+			return
+		}
+	}
+	// TODO: see why this breaks
+	///assert(false, '#'+p1.segs.length)
+}
+
+// TODO: implement fast path for axis-aligned segments.
+function offset_corner(p0, p1, p2, d, out) {
+	set_seg_offset(p0, p1, d)
+	set_seg_offset(p1, p2, d)
+	p0.max_offset = max(p0.max_offset, abs(d))
+	p1.max_offset = max(p1.max_offset, abs(d))
+	p2.max_offset = max(p2.max_offset, abs(d))
+	let [x1, y1, x2, y2] = line2.offset( d, p0[0], p0[1], p1[0], p1[1], out)
+	let [x3, y3, x4, y4] = line2.offset(-d, p2[0], p2[1], p1[0], p1[1], out)
+	let t1 = line2.intersect_line(x1, y1, x2, y2, x3, y3, x4, y4)
+	if (abs(t1) == inf) { // 0-degree corner: make a line cap of 2 points, 1*d thick
+		let dx = x2 == x4 ? d * sign(x1 - x2) : 0
+		let dy = y2 == y4 ? d * sign(y1 - y2) : 0
+		out[0] = x2 + dx
+		out[1] = y2 + dy
+		out[2] = x4 + dx
+		out[3] = y4 + dy
+	} else if (t1 != t1) { // 180-degree corner: use the offset point on the first line
+		out[0] = x2
+		out[1] = y2
+		out[2] = null
+		out[3] = null
+	} else { // bent corner
+		out[2] = null
+		out[3] = null
+		if (x1 == x2 && y3 == y4 || y1 == y2 && x3 == x4) { // axis-aligned and _|_ to each other
+			let t1s = -sign(t1-1) // branchless version of t1 < 1 ? 1 : -1
+			out[0] = x2 + d * sign(x2 - x1) * t1s
+			out[1] = y2 + d * sign(y2 - y1) * t1s
+		} else {
+			line2.at(t1, x1, y1, x2, y2, out)
+		}
+	}
+	return out
+}
+
+function poly_offset(ps, d, ops) {
+	// remove null segments as we can't offset those (they don't have a normal).
+	let ps1 = ps
+	ps = []
+	for (let i = 0, n = ps1.length; i < n; i++) {
+		let p0 = ps1[mod(i-1, n)]
+		let p1 = ps1[i]
+		if (!v2.near(p0, p1))
+			ps.push(p1)
+	}
+
+	ops.length = 0
+	if (ps.length == 1) { // single null seg: make a square
+		let ci = 0
+		for (let op of [[-d, -d], [d, -d], [d, d], [-d, d]]) {
+			op[0] += ps[0][0]
+			op[1] += ps[0][1]
+			op.p = ps[0]
+			op.d = d
+			op.ci = ci++
+			ops.push(op)
+		}
+	} else {
+		let ci = 0
+		for (let i = 0, n = ps.length; i < n; i++) {
+			let p1 = ps[i]
+			let i0 = i-1
+			let i2 = i+1
+			let p0 = ps[mod(i0--, n)]
+			let p2 = ps[mod(i2++, n)]
+			let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d, out)
+			let [x0, y0] = p1
+			let op1 = [x1, y1]
+			op1.p = p1
+			op1.d = d
+			op1.ci = ci++
+			ops.push(op1)
+			if (x2 != null) {
+				let op2 = [x2, y2]
+				op2.p = p1
+				op2.d = d
+				op2.ci = ci++
+				ops.push(op2)
+			}
+		}
+	}
+	return ops
+}
+
+// poly2 ---------------------------------------------------------------------
+
+// closed polygon with filaments used for representing the base cycles of a planar graph.
+// it can have holes in the `holes` property.
+
+function zcross2(x0, y0, x1, y1, x2, y2) {
+	let dx1 = x1 - x0
+	let dy1 = y1 - y0
+	let dx2 = x2 - x1
+	let dy2 = y2 - y1
+	return dx1 * dy2 - dy1 * dx2
+}
+
+function poly2_cons(_this, opt, elements) {
+	assign(_this, opt)
+	_this.invalid = true
+}
+
+let poly2_class = class poly2 extends Array {
+
+	constructor(opt, elements) {
+		if (elements)
+			super(...elements)
+		else
+			super()
+		poly2_cons(this, opt, elements)
+	}
+
+	to(v) {
+		return v.set(this)
+	}
+
+	point_count() { // stub: replace based on how the points are stored.
+		return this.length
+	}
+
+	get_point() { // stub: replace based on how the points are stored.
+		return out.from_v2_array(this.points, this[i])
+	}
+
+	point_count_without_holes() {
+		return this.holes?.length ? this.holes[0] : this.point_count()
+	}
+
+	center() {
+		let out = this._center
+		if (!out) {
+			out = v2()
+			this._center = out
+		}
+		if (!this._center_valid) {
+			let [x0, y0] = this.get_point(0, _v2_0)
+			let twicearea = 0
+			let x = 0
+			let y = 0
+			for (let i = 0, n = this.length, j = n-1; i < n; j = i++) {
+				let [x1, y1] = this.get_point(i, _v2_0)
+				let [x2, y2] = this.get_point(j, _v2_0)
+				let f = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
+				twicearea += f
+				x += (x1 + x2 - 2 * x0) * f
+				y += (y1 + y2 - 2 * y0) * f
+			}
+			let f = twicearea * 3
+			out[0] = x / f + x0
+			out[1] = y / f + y0
+			this._center_valid = true
+		}
+		return out
+	}
+
+	area() {
+		if (this._area == null) {
+			let s = 0
+			for (let i = 1, n = this.length; i <= n; i++) {
+				let p0 = this.get_point(mod(i-1, n), out)
+				let p1 = this.get_point(mod(i+0, n), out)
+				let p2 = this.get_point(mod(i+1, n), out)
+				s += p1[0] * p2[1] - p0[1]
+			}
+			this._area = s / 2
+		}
+		return this._area
+	}
+
+	bbox() {
+		let bb = this._bbox
+		if (!bb) {
+			bb = bbox2()
+			this._bbox = bb
+		}
+		if (!this._bbox_valid) {
+			bb.reset()
+			for (let p of this)
+				bb.add_point(p[0], p[1])
+			this._bbox_valid = true
+		}
+		return bb
+	}
+
+	// TODO: remove or ignore filaments
+	hit(x, y) {
+		let inside = false
+		for (let i = 0, j = this.length - 1; i < this.length; j = i++) {
+			let [xi, yi] = this[i]
+			let [xj, yj] = this[j]
+			let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+			if (intersect)
+				inside = !inside
+		}
+		return inside
+	}
+
+	contains_point(p) {
+		return hit(p[0], p[1])
+	}
+
+	offset(d, out) {
+		return poly_offset(this, d, out ?? poly2())
+	}
+
+	is_convex() {
+		let n = this.point_count()
+		if (n < 4)
+			return true
+		let sp = 0
+		let sn = 0
+		let [x0, y0] = this.get_point(i  , _v2_0)
+		let [x1, y1] = this.get_point(i+1, _v2_0)
+		for (let i = 2; i < n+2; i++) {
+			let [x2, y2] = this.get_point(i < n ? i : i-n, _v2_0)
+			let zcross = zcross2(x0, y0, x1, y1, x2, y2)
+			sp += zcross >= 0
+			sn += zcross <= 0
+			x0 = x1
+			y0 = y1
+			x1 = x2
+			y1 = y2
+		}
+		return sp == n || sn == n
+	}
+
+	is_convex_quad() {
+		let [x0, y0] = this.get_point(0, _v2_0)
+		let [x1, y1] = this.get_point(1, _v2_0)
+		let [x2, y2] = this.get_point(2, _v2_0)
+		let [x3, y3] = this.get_point(3, _v2_0)
+		let s1 = zcross2(x0, y0, x1, y1, x2, y2)
+		let s2 = zcross2(x1, y1, x2, y2, x3, y3)
+		let s3 = zcross2(x2, y2, x3, y3, x0, y0)
+		let s4 = zcross2(x3, y3, x0, y0, x1, y1)
+		return abs(s1 + s2 + s3 + s4) == 4
+	}
+
+	triangle_count() {
+		return 3 * (this.point_count() - 2)
+	}
+
+	triangles() {
+		if (!this._triangles) {
+			let tri_count = this.triangle_count()
+			let a = this._triangles
+			let n = this.point_count()
+			if (n == 3) { // triangle: nothing to do, push points directly.
+				if (!a)
+					a = [0, 0, 0]
+				else if (a.length != 3)
+					a.length = 3
+				a[0] = 0
+				a[1] = 1
+				a[2] = 2
+			} else if (n == 4 && this.is_convex_quad()) { // convex quad: most common case.
+				if (!a)
+					a = [0, 0, 0, 0, 0, 0]
+				else if (a.length != 6)
+					a.length = 6
+				// triangle 1
+				a[0] = 2
+				a[1] = 3
+				a[2] = 0
+				// triangle 2
+				a[3] = 0
+				a[4] = 1
+				a[5] = 2
+			} else {
+				out.length = n * 2
+				for (let i = 0; i < n; i++) {
+					let [x, y] = this.get_point(i, _v2_0)
+					out[2*i+0] = x
+					out[2*i+1] = y
+				}
+				a = earcut(out, this.holes, 2)
+				out.length = 0
+			}
+			this._triangles = a
+		}
+		return this._triangles
+	}
+
+	triangle2(ti, out) {
+		assert(out.is_triangle2)
+		let teis = this.triangles()
+		this.get_point(teis[3*ti+0], out[0])
+		this.get_point(teis[3*ti+1], out[1])
+		this.get_point(teis[3*ti+2], out[2])
+		return out
+	}
+
+	invalidate() {
+		this._triangles = null
+		this._area = null
+		this._center_valid = false
+		this._bbox_valid = false
+		return this
+	}
+
+}
+
+let poly2p = poly2_class.prototype
+poly2p.is_poly2 = true
+
+function poly2(...args) { return new poly2_class(...args) }
+poly2.class = poly2_class
+
+poly2.subclass = function(methods) {
+	let cls = class extends Array {
+		constructor(opt, elements) {
+			if (elements)
+				super(...elements)
+			else
+				super()
+			poly2_cons(this, opt, elements)
+		}
+	}
+	// static inheritance (keep lookup chain short).
+	for (let k of Object.getOwnPropertyNames(this.class.prototype))
+		cls.prototype[k] = this.class.prototype[k]
+	assign(cls.prototype, methods)
+	let cons = function(opt, elements) { return new cls(opt, elements) }
+	cons.class = cls
+	cons.subclass = poly.subclass
+	return cons
+}
+
+let poly = poly2
+
+// poly3 ---------------------------------------------------------------------
+
+let poly3_class = poly2.subclass(class poly3_class extends Array {
+
+	get_point() {
+		return out.set(this.get_point3(i, _v0).transform(this.xy_quat()))
+	}
+
+	get_point3(i, out) { // stub: replace based on how the points are stored.
+		return out.from_v3_array(this.points, this[i])
+	}
+
+	// xy_quat projects points on the xy plane for in-plane calculations.
+	xy_quat() {
+		let q = this._xy_quat
+		if (!this._xy_quat_valid) {
+			if (!q) {
+				q = quat()
+				this._xy_quat = q
+			}
+			this._xy_quat_valid = true
+		}
+		return q.set_from_unit_vectors(this.plane().normal, v3.z_axis)
+	}
+
+	plane() {
+		let p = this._plane
+		if (!this._plane_valid) {
+			if (!p) {
+				p = plane()
+				this._plane = p
+			}
+			this._plane_valid = true
+		}
+		return p.set_from_poly3(this)
+	}
+
+	get_normal(i, out) { // stub: replace based on how normals are stored.
+		return out.set(this.plane().normal)
+	}
+
+	triangle3(ti, out) {
+		assert(out.is_triangle3)
+		let teis = this.triangles()
+		this.get_point3(teis[3*ti+0], out[0])
+		this.get_point3(teis[3*ti+1], out[1])
+		this.get_point3(teis[3*ti+2], out[2])
+		return out
+	}
+
+	// (tex_uv) are 1 / (texture's (u, v) in world space).
+	uv_at(i, uvm, tex_uv, out) {
+		let xy_quat = this.xy_quat()
+		let p0 = this.get_point(0)
+		let pi = this.get_point(i)
+		pi.sub(p0).mul(tex_uv)
+		if (uvm)
+			pi.transform(uvm)
+		out[0] = pi[0]
+		out[1] = pi[1]
+		return out
+	}
+
+	// from https://www.iquilezles.org/www/articles/normals/normals.htm
+	compute_smooth_normals(normals, normalize) {
+
+		let p1 = _v1
+		let p2 = _v2
+		let p3 = _v3
+
+		let teis = this.triangles()
+		let points = this.points
+		for (let i = 0, n = teis.length; i < n; i += 3) {
+
+			let p1i = this[teis[i+0]]
+			let p2i = this[teis[i+1]]
+			let p3i = this[teis[i+2]]
+
+			p3.from_array(points, 3*p3i)
+			p1.from_array(points, 3*p1i).sub(p3)
+			p2.from_array(points, 3*p2i).sub(p3)
+
+			let p = p1.cross(p2)
+
+			normals[3*p1i+0] += p[0]
+			normals[3*p1i+1] += p[1]
+			normals[3*p1i+2] += p[2]
+
+			normals[3*p2i+0] += p[0]
+			normals[3*p2i+1] += p[1]
+			normals[3*p2i+2] += p[2]
+
+			normals[3*p3i+0] += p[0]
+			normals[3*p3i+1] += p[1]
+			normals[3*p3i+2] += p[2]
+		}
+
+		if (normalize)
+			for (let i = 0, n = normals.length; i < n; i += 3) {
+				p1.from_array(normals, i)
+				p1.normalize()
+				p1.to_array(normals, i)
+			}
+
+		return normals
+	}
+
+	invalidate() {
+		this._xy_quat_valid = false
+		this._plane_valid = false
+		poly2.prototype.invalidate.call(this)
+		return this
+	}
+
+})
+
+function poly3(...args) { return new poly3_class(...args) }
+poly3.class = poly3_class
+poly3.subclass = poly2.subclass
+
+/*
+let poly3 = poly2.subclass()
+let poly3p = poly3.prototype
+poly3p.is_poly3 = true
+poly3p.is_poly2 = null
+poly3p.get_point = function() {
+	return out.set(this.get_point3(i, _v0).transform(this.xy_quat()))
+}
+poly3p.get_point3 = function(i, out) { // stub: replace based on how the points are stored.
+	return out.from_v3_array(this.points, this[i])
+}
+*/
+
+/*
 
 // poly3 ---------------------------------------------------------------------
 
@@ -2470,7 +3160,7 @@ let poly3p = poly3_class.prototype
 
 poly3p.is_poly3 = true
 
-poly3 = function(opt, elements) { return new poly3_class(opt, elements) }
+let poly3 = function(opt, elements) { return new poly3_class(opt, elements) }
 poly3.class = poly3_class
 
 poly3.subclass = function(methods) {
@@ -2490,20 +3180,27 @@ poly3.subclass = function(methods) {
 }
 
 // point accessor stubs. replace in subclasses based on how the points are stored.
-poly3p.point_count = function point_count() {
+poly3p.point_count = function() {
 	return this.length
 }
-poly3p.get_point = function get_point(i, out) {
+poly3p.get_point = function(i, out) {
 	return out.from_v3_array(this.points, this[i])
+}
+poly3p.get_point3 = function(i, out) {
+	return this.get_point(i, out)
 }
 poly3p.get_normal = function(i, out) {
 	return out.set(this.plane().normal)
 }
 
+poly3p.point_count_without_holes = function() {
+	return this.holes?.length ? this.holes[0] : this.point_count()
+}
+
 poly3p._update_plane = function() {
 	let pl = this._plane || plane()
 	this._plane = pl
-	pl.set_from_poly(this)
+	pl.set_from_poly3(this)
 }
 poly3p.plane = function() {
 	return this._update_if_invalid()._plane
@@ -2603,7 +3300,7 @@ poly3p._update_triangles = function() {
 			ps[2*i+0] = p[0]
 			ps[2*i+1] = p[1]
 		}
-		out = earcut2(ps, null, 2)
+		out = earcut(ps, this.holes, 2)
 	}
 	this._triangles = out
 }
@@ -2677,9 +3374,6 @@ poly3p.contains_point = function(p) {
 }
 
 // (tex_uv) are 1 / (texture's (u, v) in world space).
-{
-let _v2_0 = v2()
-let _v2_1 = v2()
 poly3p.uv_at = function(i, uvm, tex_uv, out) {
 	let xy_quat = this.xy_quat()
 	let p0 = _v2_0.set(this.get_point(0, _v0).transform(xy_quat))
@@ -2689,15 +3383,6 @@ poly3p.uv_at = function(i, uvm, tex_uv, out) {
 		pi.transform(uvm)
 	out[0] = pi[0]
 	out[1] = pi[1]
-	return out
-}}
-
-poly3p.uvs = function(uvm, tex_uv, out) {
-	for (let i = 0, n = this.point_count(); i < n; i++) {
-		let uv = this.uv_at(i, uvm, tex_uv, _v1)
-		out[2*i+0] = uv[0]
-		out[2*i+1] = uv[1]
-	}
 	return out
 }
 
@@ -2730,134 +3415,204 @@ poly3p.center = function(out) {
 	return out
 }
 
-
-/*
-// region-finding algorithm --------------------------------------------------
-
-// The algorithm below is O(n log n) and it's from the paper:
-//   "An optimal algorithm for extracting the regions of a plane graph"
-//   X.Y. Jiang and H. Bunke, 1992.
-
-// return a number from the range [0..4) which is monotonically increasing
-// with the clockwise angle that the input vector makes against the x axis.
-function v2_pseudo_angle(dx, dy) {
-	let p = dx / (abs(dx) + abs(dy))  // -1..0 (x <= 0) or 0..1 (x >= 0)
-	return dy < 0 ? 3 + p : 1 - p     //  2..4 (y <= 0) or 0..2 (y >= 0)
-}
-
-poly3_class.regions = function() {
-
-	if (this._regions)
-		return this._regions
-
-	let pp = this.project_xy()
-
-	// phase 1: find all wedges.
-
-	// step 1+2: make pairs of directed edges from all the edges and compute
-	// their angle-to-horizontal so that they can be then sorted by that angle.
-	let edges = [] // [[p1i, p2i, angle], ...]
-	let p1 = v3()
-	let p2 = v3()
-	for (let i = 0, n = pp.point_count(); i < n; i++) {
-		let p1i = i
-		let p2i = (i+1) % n
-		pp.get_point(p1i, p1)
-		pp.get_point(p2i, p2)
-		edges.push(
-			[p1i, p2i, v2_pseudo_angle(p2[0] - p1[0], p2[1] - p1[1])],
-			[p2i, p1i, v2_pseudo_angle(p1[0] - p2[0], p1[1] - p2[1])])
-	}
-
-	// step 3: sort by edges by (p1, angle).
-	edges.sort(function(e1, e2) {
-		if (e1[0] == e2[0])
-			return e1[2] < e2[2] ? -1 : (e1[2] > e2[2] ? 1 : 0)
-		else
-			return e1[0] < e2[0] ? -1 : 1
-	})
-
-	// for (let e of edges) { pr('e', e[0]+1, e[1]+1) }
-
-	// step 4: make wedges from edge groups formed by edges with the same p1.
-	let wedges = [] // [[p1i, p2i, p3i, used], ...]
-	let wedges_first_pi = edges[0][1]
-	for (let i = 0; i < edges.length; i++) {
-		let edge = edges[i]
-		let next_edge = edges[i+1]
-		let same_group = next_edge && edge[0] == next_edge[0]
-		if (same_group) {
-			wedges.push([edge[1], edge[0], next_edge[1], false])
-		} else {
-			wedges.push([edge[1], edge[0], wedges_first_pi, false])
-			wedges_first_pi = next_edge && next_edge[1]
-		}
-	}
-
-	// for (let w of wedges) { pr('w', w[0]+1, w[1]+1, w[2]+1) }
-
-	// phase 2: group wedges into regions.
-
-	// step 1: sort wedges by (p1, p2) so we can binsearch them by the same key.
-	wedges.sort(function(w1, w2) {
-		if (w1[0] == w2[0])
-			return w1[1] < w2[1] ? -1 : (w1[1] > w2[1] ? 1 : 0)
-		else
-			return w1[0] < w2[0] ? -1 : 1
-	})
-
-	// for (let w of wedges) { pr('w', w[0]+1, w[1]+1, w[2]+1) }
-
-	// step 2: mark all wedges as unused (already did on construction).
-	// step 3, 4, 5: find contiguous wedges and group them into regions.
-	// NOTE: the result also contans the outer region which goes clockwise
-	// while inner regions go anti-clockwise.
-	let regions = [] // [[p1i, p2i, ...], ...]
-	let k = [0, 0] // reusable (p1i, p2i) key for binsearch.
-	function cmp_wedges(w1, w2) { // binsearch comparator on wedge's (p1i, p2i).
-		return w1[0] == w2[0] ? w1[1] < w2[1] : w1[0] < w2[0]
-	}
-	for (let i = 0; i < wedges.length; i++) {
-		let w0 = wedges[i]
-		if (w0[3])
-			continue // skip wedges marked used
-		region = [w0[1]]
-		regions.push(region)
-		k[0] = w0[1]
-		k[1] = w0[2]
-		while (1) {
-			let i = wedges.binsearch(k, cmp_wedges)
-			let w = wedges[i]
-			region.push(w[1])
-			w[3] = true // mark used so we can skip it
-			if (w[1] == w0[0] && w[2] == w0[1]) // cycle complete.
-				break
-			k[0] = w[1]
-			k[1] = w[2]
-		}
-	}
-
-	// for (let r of regions) { pr('r', r.map(i => i+1)) }
-
-	this._regions = regions
-	return regions
-}
-
-// TODO: redo this test with a poly3
-function test_plane_graph_regions() {
-	let points = [
-		v3(0, -5, 0),
-		v3(-10, 0, 0), v3(10, 0, 0), v3(-10, 5, 0), v3(10, 5, 0),
-		//v3(-5, 1, 0), v3(5,  1, 0), v3(-5, 4, 0), v3(5, 4, 0),
-		//v3(0, -1, 0), v3(1, -2, 0),
-	]
-	let get_point = function(i, out) { out.set(points[i]); return out }
-	let lines  = [0,1, 0,2,  1,2, 1,3, 2,4, 3,4,  ] // 5,6, 5,7, 6,8, 7,8,  0,9, 9,10]
-	let rt = plane_graph_regions(v3(0, 0, 1), get_point, lines)
-	for (let r of rt) { pr(r.map(i => i+1)) }
-}
-// test_plane_graph_regions()
 */
+
+// line2 ---------------------------------------------------------------------
+
+let line2_class = class line2 extends Array {
+
+	constructor(p0, p1) {
+		super(p0 || v2(), p1 || v2())
+	}
+
+	set(p0, p1) {
+		if (p0.is_line2) {
+			let line = p0
+			p0 = line[0]
+			p1 = line[1]
+		}
+		this[0].set(p0)
+		this[1].set(p1)
+		return this
+	}
+
+	assign(v) {
+		let p0 = this[0]
+		let p1 = this[1]
+		assign(this, v)
+		this[0] = p0.assign(v[0])
+		this[1] = p1.assign(v[1])
+		return this
+	}
+
+	to(v) {
+		return v.set(this)
+	}
+
+	clone() {
+		return new line2().set(this[0], this[1])
+	}
+
+	equals(line) {
+		return (
+			line[0].equals(this[0]) &&
+			line[1].equals(this[1])
+		)
+	}
+
+	near(line) {
+		return (
+			line[0].near(this[0]) &&
+			line[1].near(this[1])
+		)
+	}
+
+	delta(out) {
+		return v2.sub(this[1], this[0], out)
+	}
+
+	distance2() {
+		return this[0].distance2(this[1])
+	}
+
+	distance() {
+		return this[0].distance2(this[1])
+	}
+
+	at(t, out) {
+		return line2.at(t, x1, y1, x2, y2, out)
+	}
+
+	reverse() {
+		let p0 = this[0]
+		this[0] = this[1]
+		this[1] = p0
+		return this
+	}
+
+	len() {
+		return this.delta(_v2_0).len()
+	}
+
+	set_len(len) {
+		this[1].set(this.delta(_v2_0).set_len(len).add(this[0]))
+		return this
+	}
+
+	to_array(a, i) {
+		this[0].to_array(a, i)
+		this[1].to_array(a, i+2)
+		return a
+	}
+
+	to_line2_array(a, i) {
+		this[0].to_v2_array(a, 2 * (i+0))
+		this[1].to_v2_array(a, 2 * (i+1))
+		return a
+	}
+
+	from_array(a, i) {
+		this[0].from_array(a, i)
+		this[1].from_array(a, i+2)
+		return this
+	}
+
+	from_line2_array(a, i) {
+		this[0].from_v2_array(a, 2 * (i+0))
+		this[1].from_v2_array(a, 2 * (i+1))
+		return this
+	}
+
+	closest_point_to_point_t(p, clamp_to_line) {
+		let p0 = v2.sub(p, this[0], _v2_0)
+		let p1 = v2.sub(this[1], this[0], _v2_1)
+		let t = p1.dot(p0) / p1.dot(p1)
+		if (clamp_to_line)
+			t = clamp(t, 0, 1)
+		return t
+	}
+
+	closest_point_to_point(p, clamp_to_line, out) {
+		out.t = this.closest_point_to_point_t(p, clamp_to_line)
+		return this.delta(out).muls(out.t).add(this[0])
+	}
+
+	transform(m) {
+		this[0].transform(m)
+		this[1].transform(m)
+		return this
+	}
+
+	intersect_line(other) {
+		let [p1, p2] = this
+		let [p3, p4] = other
+		let [x1, y1] = p1
+		let [x2, y2] = p2
+		let [x3, y3] = p3
+		let [x4, y4] = p4
+		return line2.intersect_line(x1, y1, x2, y2, x3, y3, x4, y4)
+	}
+
+	intersects_line(other) {
+		return line2.intersects_line(this, other)
+	}
+
+	offset(d, out) {
+		let [p1, p2] = this
+		let [x1, y1] = p1
+		let [x2, y2] = p2
+		let [x3, y3, x4, y4] = line2.offset(d, x1, y1, x2, y2, out)
+		out[0][0] = x3
+		out[0][1] = y3
+		out[1][0] = x4
+		out[1][1] = y4
+		return out
+	}
+
+}
+
+line2_class.prototype.is_line2 = true
+
+let line2 = function(p1, p2) { return new line2_class(p1, p2) }
+
+// evaluate a line at time t using linear interpolation.
+// the time between 0..1 covers the segment interval.
+line2.at = function line2_at(t, x1, y1, x2, y2, out) {
+	out[0] = x1 + t * (x2 - x1)
+	out[1] = y1 + t * (y2 - y1)
+	return out
+}
+
+// intersect line segment (x1, y1, x2, y2) with line segment (x3, y3, x4, y4).
+// returns the time on the first line where intersection occurs.
+// if the intersection occurs outside the segments themselves, then t is
+// outside the 0..1 range. if the lines are parallel then t is +/-inf.
+// if they are coincidental, t is NaN.
+line2.intersect_line = function line2_intersect_line(x1, y1, x2, y2, x3, y3, x4, y4) {
+	let d = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1)
+	return ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / d
+}
+
+line2.intersects_line = function line2_intersects_line(l1, l2) {
+	let t = line2_line2_intersect(l1, l2)
+	return t >= 0 && t <= 1
+}
+
+// parallel line segment at a distance on the right side of a segment.
+// use a negative distance for the left side, or reflect the returned points
+// against their respective initial points.
+line2.offset = function line2_offset(d, x1, y1, x2, y2, out) {
+	// normal vector of the same length as original segment.
+	let dx = -(y2-y1)
+	let dy =   x2-x1
+	let k = d / distance(x1, y1, x2, y2) // normal vector scale factor
+	// normal vector scaled and translated to (x1,y1) and (x2,y2)
+	out[0] = x1 + dx * k
+	out[1] = y1 + dy * k
+	out[2] = x2 + dx * k
+	out[3] = y2 + dy * k
+	return out
+}
 
 // line3 ---------------------------------------------------------------------
 
@@ -3042,7 +3797,101 @@ let line3_class = class line3 extends Array {
 
 line3_class.prototype.is_line3 = true
 
-line3 = function(p1, p2) { return new line3_class(p1, p2) }
+let line3 = function(p1, p2) { return new line3_class(p1, p2) }
+
+// bbox2 ---------------------------------------------------------------------
+
+let bbox2_class = class bbox2 extends Array {
+
+	constructor(x1, y1, x2, y2) {
+		super(
+			x1 ?? inf,
+			y1 ?? inf,
+			x2 ?? -inf,
+			y2 ?? -inf
+		)
+	}
+
+	reset() {
+		this[0] =  inf
+		this[1] =  inf
+		this[2] = -inf
+		this[3] = -inf
+		return this
+	}
+
+	add_bbox2(x1, y1, x2, y2) {
+		this[0] = min(this[0], x1, x2)
+		this[1] = min(this[1], y1, y2)
+		this[2] = max(this[2], x1, x2)
+		this[3] = max(this[3], y1, y2)
+		return this
+	}
+
+	add_point(x, y) {
+		this[0] = min(this[0], x)
+		this[1] = min(this[1], y)
+		this[2] = max(this[2], x)
+		this[3] = max(this[3], y)
+		return this
+	}
+
+	add_points(ps) {
+		for (let [x, y] of ps)
+			this.add_point(x, y)
+		return this
+	}
+
+	add(x, y) {
+		if (isnum(x))
+			return add_point(x, y)
+		else if (x.is_v2 || x.is_v3 || x.is_v4)
+			return add_point(x[0], x[1])
+		else if (x.is_bbox2)
+			return add_bbox2(x)
+		else if (isarray(x))
+			return add_points(x)
+		else
+			assert(false)
+	}
+
+	rotate(a) {
+		if (!a)
+			return
+		let [x1, y1, x2, y2] = this
+		let cx = (x2 + x1) / 2
+		let cy = (y2 + y1) / 2
+		let [p1x, p1y] = rotate_point(x1, y1, cx, cy, a, out)
+		let [p2x, p2y] = rotate_point(x1, y2, cx, cy, a, out)
+		let [p3x, p3y] = rotate_point(x2, y1, cx, cy, a, out)
+		let [p4x, p4y] = rotate_point(x2, y2, cx, cy, a, out)
+		this.reset()
+		this.add_point(p1x, p1y)
+		this.add_point(p2x, p2y)
+		this.add_point(p3x, p3y)
+		this.add_point(p4x, p4y)
+		return this
+	}
+
+	inside_bbox2(px1, py1, px2, py2) {
+		let [cx1, cy1, cx2, cy2] = this
+		return cx1 >= px1 && cx2 <= px2 && cy1 >= py1 && cy2 <= py2
+	}
+
+	hit(x, y) {
+		let [x1, y1, x2, y2] = this
+		return x >= x1 && x <= x2 && y >= y1 && y <= y2
+	}
+
+	contains_point(p) {
+		return hit(p[0], p[1])
+	}
+
+}
+
+bbox2_class.prototype.is_bbox2 = true
+
+function bbox2(x1, y1, x2, y2) { return new bbox2_class(x1, y1, x2, y2) }
 
 // box3 ----------------------------------------------------------------------
 
@@ -3211,8 +4060,8 @@ box3_class.prototype.is_box3 = true
 property(box3_class, 'min', function() { return this[0] }, function(v) { this[0] = v })
 property(box3_class, 'max', function() { return this[1] }, function(v) { this[1] = v })
 
-box3 = function(x1, y1, x2, y2) { return new box3_class(x1, y1, x2, y2) }
-box = box3
+let box3 = function(x1, y1, x2, y2) { return new box3_class(x1, y1, x2, y2) }
+let box = box3
 
 // templates for parametric modeling -----------------------------------------
 
@@ -3277,13 +4126,13 @@ box3.triangle_pis_back .max_index = 7
 
 // camera --------------------------------------------------------------------
 
-{
+let camera; {
 let _v4_0 = v4()
 camera = function(e) {
 	e = e || {}
 
-	e.pos  = e.pos || v3(-1, 5, 10)
-	e.dir  = e.dir || v3(-.5, .5, 1)
+	e.pos  = e.pos || v3(-500, 1000, 1000) // v3(-1, 5, 10)
+	e.dir  = e.dir || v3(-.5, .5, .5) // v3(-.5, .5, 1)
 	e.up   = e.up  || v3(0, 1, 0)
 
 	e.fov  = e.fov || 60
@@ -3479,6 +4328,30 @@ camera = function(e) {
 	return e
 }}
 
-camera3 = camera // so you can do `let camera = camera3()`.
+let camera3 = camera // so you can do `let camera = camera3()`.
+
+// publishing ----------------------------------------------------------------
+
+let Math3D = {
+	NEAR, FAR, near, near_angle,
+	v2, v3, v4,
+	mat3, mat3f32,
+	mat4, mat4f32,
+	quat, quat3,
+	plane, plane3,
+	triangle2, triangle3,
+	poly, poly2, poly3,
+	line2, line3,
+	bbox2, box, box3,
+	camera, camera3,
+}
+G.Math3D = Math3D
+
+if (document.currentScript.hasAttribute('global')) {
+	for (let k in Math3D) {
+		assert(!(k in G), k, ' global already exists')
+		G[k] = Math3D[k]
+	}
+}
 
 }()) // module scope.

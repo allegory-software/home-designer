@@ -19,10 +19,12 @@
 
 (function() {
 
+let LOG = 0
+
 model3_component = function(pe) {
 
 	assert(pe)
-	let e = {name: pe.name, editor: pe.editor}
+	let e = {name: pe.name}
 	let gl = assert(pe.gl)
 	let push_undo = pe.push_undo
 
@@ -39,7 +41,7 @@ model3_component = function(pe) {
 	let prc       = [] // [rc1,...]; ref counts of points.
 	let lines     = [] // [(p1i, p2i, rc, sm, op), ...]; rc=refcount, sm=smoothness, op=opacity.
 	let free_lis  = [] // [l1i,...]; freelist of line indices.
-	let faces     = [] // [poly3[p1i, p2i, ..., lis: [line1i,...], selected:, material:, ],...]
+	let faces     = [] // [poly3([p1i, p2i, ..., holes: [hole1_start_pi,...], lis: [line1i,...], selected:, material:, ]),...]
 	let free_fis  = [] // [face1_index,...]
 	let meshes    = set() // {{face},...}; meshes are sets of all faces connected by smooth lines.
 
@@ -381,7 +383,7 @@ model3_component = function(pe) {
 		return mat_insts
 	}
 
-	function add_face(pis, lis, material) {
+	function add_face(pis, lis, material, holes) {
 		let face
 		let fi = free_fis.pop()
 		if (fi == null) {
@@ -398,6 +400,18 @@ model3_component = function(pe) {
 			face.extend(pis)
 			for (let pi of pis)
 				ref_point(pi)
+		}
+		if (holes) { // [[hole1_pi1, hole1_pi2, ...], ...]
+			if (!face.holes)
+				face.holes = [] // [hole1_pi1, hole2_pi1, ...]
+			for (let hole_pis of holes) {
+				face.holes.push(face.length) // hole_pi1
+				// poly3 wants hole pis added at the end of the array and uses
+				// .holes[0] to know where the points end and the holes start.
+				face.extend(hole_pis)
+				for (let pi of hole_pis)
+					ref_point(pi)
+			}
 		}
 		if (lis) {
 			face.lis.extend(lis)
@@ -421,6 +435,8 @@ model3_component = function(pe) {
 		for (let pi of face)
 			unref_point(pi)
 		face.length = 0
+		if (face.holes)
+			face.holes.length = 0
 		face.lis.length = 0
 		face.mat_inst.remove_value(face)
 		face.mat_inst = null
@@ -462,16 +478,26 @@ model3_component = function(pe) {
 		return found_li
 	}
 
-	function update_face_lis(face) {
-		let lis = face.lis
-		lis.length = 0
-		let p1i = face[0]
-		for (let i = 1, n = face.length; i < n; i++) {
+	function update_face_lis_for_poly(face, i1, i2) {
+		let p0i = face[i1]
+		let p1i = p0i
+		for (let i = i1+1; i < i2; i++) {
 			let p2i = face[i]
-			lis.push(assert(ref_or_add_line(p1i, p2i)))
+			face.lis.push(ref_or_add_line(p1i, p2i))
 			p1i = p2i
 		}
-		lis.push(assert(ref_or_add_line(p1i, face[0])))
+		face.lis.push(ref_or_add_line(p1i, p0i))
+	}
+
+	function update_face_lis(face) {
+		face.lis.length = 0
+		update_face_lis_for_poly(face, 0, face.point_count_without_holes())
+		if (face.holes)
+			for (let i = 0, n = face.holes.length; i < n; i++) {
+				let i1 = face.holes[i]
+				let i2 = face.holes[i+1] ?? face.point_count()
+				update_face_lis_for_poly(face, i1, i2)
+			}
 		faces_changed = true
 	}
 
@@ -615,7 +641,6 @@ model3_component = function(pe) {
 
 	function add_child(comp, mat, layer) {
 		assert(mat.is_mat4)
-		assert(comp.editor == pe.editor)
 		mat.comp = comp
 		mat.layer = layer || pe.default_layer
 		children.push(mat)
@@ -626,7 +651,7 @@ model3_component = function(pe) {
 	}
 
 	function remove_child(mat) {
-		assert(children.remove_value(mat))
+		assert(children.remove_value(mat) >= 0)
 		pe.child_removed(e, mat)
 	}
 
@@ -678,7 +703,7 @@ model3_component = function(pe) {
 
 		if (t.faces)
 			for (let ft of t.faces)
-				add_face(ft, ft.lis, ft.material)
+				add_face(ft.pis, ft.lis, ft.material, ft.holes)
 
 		if (t.lines)
 			for (let i = 0, n = t.lines.length; i < n; i += 2)
@@ -1292,9 +1317,9 @@ model3_component = function(pe) {
 	let inv_edge_lis_dab     = gl && gl.dyn_arr_u32_index_buffer() // black dashed lines
 	let sel_inv_edge_lis_dab = gl && gl.dyn_arr_u32_index_buffer() // blue dashed lines
 
-	let points_rr             = gl.points_renderer()
+	let points_rr             = gl.points_renderer({base_color: pe.black})
 	let faces_rr              = gl.faces_renderer()
-	let black_thin_lines_rr   = gl.solid_lines_renderer()
+	let black_thin_lines_rr   = gl.solid_lines_renderer({base_color: pe.black})
 	let black_dashed_lines_rr = gl.dashed_lines_renderer({dash: 5, gap: 3})
 	let blue_dashed_lines_rr  = gl.dashed_lines_renderer({dash: 5, gap: 3, base_color: 0x0000ff})
 	let black_fat_lines_rr    = gl.fat_lines_renderer({})
