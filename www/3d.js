@@ -2907,48 +2907,44 @@ let poly2_class = class poly2 extends Array {
 	}
 
 	triangles() {
-		if (!this._triangles) {
-			let tri_count = this.triangle_count()
-			let a = this._triangles
+		let a = this._triangles
+		if (!this._triangles_valid) {
+			if (!a) {
+				a = []
+				this._triangles = a
+			}
 			let n = this.point_count()
 			if (n == 3) { // triangle: nothing to do, push points directly.
-				if (!a) {
-					a = [0, 1, 2]
-				} else {
-					if (a.length != 3)
-						a.length = 3
-					a[0] = 0
-					a[1] = 1
-					a[2] = 2
-				}
+				if (a.length != 3)
+					a.length = 3
+				a[0] = 0
+				a[1] = 1
+				a[2] = 2
 			} else if (n == 4 && this.is_convex_quad()) { // convex quad: most common case.
-				if (!a) {
-					a = [2, 3, 0, 0, 1, 2]
-				} else {
-					if (a.length != 6)
-						a.length = 6
-					// triangle 1
-					a[0] = 2
-					a[1] = 3
-					a[2] = 0
-					// triangle 2
-					a[3] = 0
-					a[4] = 1
-					a[5] = 2
-				}
+				if (a.length != 6)
+					a.length = 6
+				// triangle 1
+				a[0] = 2
+				a[1] = 3
+				a[2] = 0
+				// triangle 2
+				a[3] = 0
+				a[4] = 1
+				a[5] = 2
 			} else {
+				a.length = 0
 				out.length = n * 2
 				for (let i = 0; i < n; i++) {
 					let [x, y] = this.get_point(i, _v2_0)
 					out[2*i+0] = x
 					out[2*i+1] = y
 				}
-				a = earcut(out, this.holes, 2)
+				earcut(out, this.holes, 2, a)
 				out.length = 0
 			}
-			this._triangles = a
+			this._triangles_valid = true
 		}
-		return this._triangles
+		return a
 	}
 
 	triangle2(ti, out) {
@@ -3018,7 +3014,7 @@ let poly2_class = class poly2 extends Array {
 
 	invalidate() {
 		this._xyz_quat_valid = false
-		this._triangles = null
+		this._triangles_valid = false
 		this._area = null
 		this._center_valid = false
 		this._bbox_valid = false

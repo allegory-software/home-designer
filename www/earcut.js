@@ -2,14 +2,15 @@
 (function() {
 'use strict';
 
-function earcut(data, holeIndices, dim) {
+function earcut(data, holeIndices, dim, triangles) {
 
     dim = dim || 2;
 
     var hasHoles = holeIndices && holeIndices.length,
         outerLen = hasHoles ? holeIndices[0] * dim : data.length,
-        outerNode = linkedList(data, 0, outerLen, dim, true),
-        triangles = [];
+        outerNode = linkedList(data, 0, outerLen, dim, true);
+
+    triangles ??= [];
 
     if (!outerNode || outerNode.next === outerNode.prev) return triangles;
 
