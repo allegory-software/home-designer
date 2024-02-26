@@ -2895,10 +2895,10 @@ let poly2_class = class poly2 extends Array {
 		let [x1, y1] = this.get_point(1, _v2_0)
 		let [x2, y2] = this.get_point(2, _v2_0)
 		let [x3, y3] = this.get_point(3, _v2_0)
-		let s1 = zcross2(x0, y0, x1, y1, x2, y2)
-		let s2 = zcross2(x1, y1, x2, y2, x3, y3)
-		let s3 = zcross2(x2, y2, x3, y3, x0, y0)
-		let s4 = zcross2(x3, y3, x0, y0, x1, y1)
+		let s1 = sign(zcross2(x0, y0, x1, y1, x2, y2))
+		let s2 = sign(zcross2(x1, y1, x2, y2, x3, y3))
+		let s3 = sign(zcross2(x2, y2, x3, y3, x0, y0))
+		let s4 = sign(zcross2(x3, y3, x0, y0, x1, y1))
 		return abs(s1 + s2 + s3 + s4) == 4
 	}
 
