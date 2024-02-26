@@ -525,7 +525,7 @@ gl.faces_renderer = function() {
 				let j0 = j
 				let i, n
 				for (i = 0, n = face.length; i < n; i++, j++) {
-					let p  = face.get_point(i, _v0)
+					let p  = face.get_point3(i, _v0)
 					let np = face.get_normal(i, _v1)
 					let uv = face.uv_at(i, face.uvm, mat.uv, _uv)
 					pos[3*j+0] = p[0]

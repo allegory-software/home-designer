@@ -65,7 +65,7 @@ model3_component = function(pe) {
 	{
 	let _v0 = v3()
 	function get_point(pi, out) {
-		out = out || _v0
+		out ??= _v0
 		out[0] = points[3*pi+0]
 		out[1] = points[3*pi+1]
 		out[2] = points[3*pi+2]
@@ -335,44 +335,47 @@ model3_component = function(pe) {
 		push_undo(replace_line_endpoint, old_pi, new_pi)
 	}
 
-	let face = {is_face3: true}
+	let face3 = poly3.subclass(class face3 extends Array {
 
-	face.get_point = function(ei, out) {
-		return get_point(this[ei], out)
-	}
+		static is_poly3 = true
+		static is_face3 = true
 
-	face.get_normal = function(ei, out) {
-		if (this.mesh)
-			return out.from_v3_array(normals, this[ei])
-		else
-			return this.plane().normal
-	}
-
-	face.get_edge = function(ei, out) {
-		out = get_line(this.lis[ei], out)
-		out.ei = ei // edge index.
-		if (out[1].i == this[ei]) { // fix edge endpoints order.
-			let p1 = out[0]
-			let p2 = out[1]
-			out[0] = p2
-			out[1] = p1
+		get_point3(i, out) {
+			return get_point(this[i], out)
 		}
-		return out
-	}
 
-	face.each_edge = function(f) {
-		for (let ei = 0, n = this.length; ei < n; ei++)
-			f(this.get_edge(ei))
-	}
+		get_normal(i, out) {
+			if (this.mesh)
+				return out.from_v3_array(normals, this[i])
+			else
+				return this.plane().normal
+		}
 
-	face.is_flat = function() {
-		for (let li of face.lis)
-			if (lines[5*li+3])
-				return false
-		return true
-	}
+		get_edge(ei, out) {
+			out = get_line(this.lis[ei], out)
+			out.ei = ei // edge index.
+			if (out[1].i == this[ei]) { // fix edge endpoints order.
+				let p1 = out[0]
+				let p2 = out[1]
+				out[0] = p2
+				out[1] = p1
+			}
+			return out
+		}
 
-	let face3 = poly3.subclass(face)
+		each_edge(f) {
+			for (let ei = 0, n = this.length; ei < n; ei++)
+				f(this.get_edge(ei))
+		}
+
+		is_flat() {
+			for (let li of face.lis)
+				if (lines[5*li+3])
+					return false
+			return true
+		}
+
+	})
 
 	let mat_faces_map = map() // {material -> [face1,...]}
 

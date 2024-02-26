@@ -87,15 +87,16 @@ API
 		area midpoint normal plane barycoord uv contains_point is_front_facing
 
 	poly[2] [pi1, ..., hole1_pi1, hole1_pi2, ..., points: [p1,...], holes: [hole1_pi1, hole2_pi1, ...]]
-		% point_count get_point invalidate
-		plane xy_quat is_convex is_convex_quad triangle_count triangles triangle2 triangle3
-		center bbox area
+		% point_count get_point
+		is_convex is_convex_quad triangle_count triangles triangle2
+		center bbox area invalidate
 		hit contains_point
 		uv_at
+		set_plane plane xyz_quat get_point3 triangle3 get_normal
 		subclass
 
 	poly3
-		get_point2 get_point3
+		xy_quat compute_smooth_normals
 
 	line2 [p0, p1]
 		* intersect_line intersects_line offset
@@ -156,7 +157,7 @@ function rotate_point(px, py, cx, cy, angle, out) {
 let v2_class = class v extends Array {
 
 	constructor(x, y) {
-		super(x || 0, y || 0)
+		super(x ?? 0, y ?? 0)
 	}
 
 	set(x, y) {
@@ -426,7 +427,7 @@ function set_hsl(self, h, s, L) {
 let v3_class = class v extends Array {
 
 	constructor(x, y, z) {
-		super(x || 0, y || 0, z || 0)
+		super(x ?? 0, y ?? 0, z ?? 0)
 	}
 
 	set(x, y, z) {
@@ -787,7 +788,7 @@ let _v4 = v3()
 let v4_class = class v extends Array {
 
 	constructor(x, y, z, w) {
-		super(x || 0, y || 0, z || 0, w ?? 1)
+		super(x ?? 0, y ?? 0, z ?? 0, w ?? 1)
 	}
 
 	set(x, y, z, w) {
@@ -1910,7 +1911,7 @@ mat4f32.identity = mat4f32()
 let quat_class = class q extends Array {
 
 	constructor(x, y, z, w) {
-		super(x || 0, y || 0, z || 0, w ?? 1)
+		super(x ?? 0, y ?? 0, z ?? 0, w ?? 1)
 	}
 
 	set(x, y, z, w) {
@@ -2202,8 +2203,8 @@ let _m3_1 = mat3()
 let plane_class = class plane {
 
 	constructor(normal, constant) {
-		this.normal = normal || v3.up.clone()
-		this.constant = constant || 0
+		this.normal = normal ?? v3.up.clone()
+		this.constant = constant ?? 0
 	}
 
 	set(normal, constant) {
@@ -2256,7 +2257,7 @@ let plane_class = class plane {
 		let pn = _v1.set(0, 0, 0)
 		let p1 = poly.get_point3(0, _v2)
 		for (let i = 1; i <= n; i++) {
-			let p2 = poly.get_point(i % n, _v3)
+			let p2 = poly.get_point3(i % n, _v3)
 			pn[0] += (p1[1] - p2[1]) * (p1[2] + p2[2])
 			pn[1] += (p1[2] - p2[2]) * (p1[0] + p2[0])
 			pn[2] += (p1[0] - p2[0]) * (p1[1] + p2[1])
@@ -2366,10 +2367,10 @@ let plane3 = plane // so you can do `let plane = plane3()`.
 
 // triangle2 -----------------------------------------------------------------
 
-let triangle2_class = class triangle3 extends Array {
+let triangle2_class = class triangle2 extends Array {
 
 	constructor(a, b, c) {
-		super(a || v2(), b || v2(), c || v2())
+		super(a ?? v2(), b ?? v2(), c ?? v2())
 	}
 
 	set(a, b, c) {
@@ -2484,7 +2485,7 @@ triangle2.hit = function triangle2_hit(x, y, p1, p2, p3) {
 let triangle3_class = class triangle3 extends Array {
 
 	constructor(a, b, c) {
-		super(a || v3(), b || v3(), c || v3())
+		super(a ?? v3(), b ?? v3(), c ?? v3())
 	}
 
 	set(a, b, c) {
@@ -2653,6 +2654,7 @@ triangle3.is_front_facing = function triangle3_is_front_facing(a, b, c, directio
 
 // polygon offseting algorithm -----------------------------------------------
 
+// TODO: remove this
 function set_seg_offset(p1, p2, d) {
 	for (let seg of p1.segs) {
 		if (seg[0] == p2) { // (p2,p1) right side offset
@@ -2754,8 +2756,13 @@ function poly_offset(ps, d, ops) {
 
 // poly2 ---------------------------------------------------------------------
 
-// closed polygon with filaments used for representing the base cycles of a planar graph.
+// closed polygon used for representing the base cycles of a planar graph.
+// it can have filaments (coincident lines) which show as duplicate points.
 // it can have holes in the `holes` property.
+// it works on 2D points but you can use `set_plane()` to set a plane
+// and then access points in 3D with `get_point3()`.
+// after changing the points you must call invalidate(). changing the plane
+// doesn't require calling invalidate().
 
 function zcross2(x0, y0, x1, y1, x2, y2) {
 	let dx1 = x1 - x0
@@ -2765,20 +2772,9 @@ function zcross2(x0, y0, x1, y1, x2, y2) {
 	return dx1 * dy2 - dy1 * dx2
 }
 
-function poly2_cons(_this, opt, elements) {
-	assign(_this, opt)
-	_this.invalid = true
-}
-
 let poly2_class = class poly2 extends Array {
 
-	constructor(opt, elements) {
-		if (elements)
-			super(...elements)
-		else
-			super()
-		poly2_cons(this, opt, elements)
-	}
+	static is_poly2 = true
 
 	to(v) {
 		return v.set(this)
@@ -2827,10 +2823,10 @@ let poly2_class = class poly2 extends Array {
 		if (this._area == null) {
 			let s = 0
 			for (let i = 1, n = this.length; i <= n; i++) {
-				let p0 = this.get_point(mod(i-1, n), out)
-				let p1 = this.get_point(mod(i+0, n), out)
-				let p2 = this.get_point(mod(i+1, n), out)
-				s += p1[0] * p2[1] - p0[1]
+				let [x0, y0] = this.get_point(mod(i-1, n), _v2_0)
+				let [x1, y1] = this.get_point(mod(i+0, n), _v2_0)
+				let [x2, y2] = this.get_point(mod(i+1, n), _v2_0)
+				s += x1 * y2 - y0
 			}
 			this._area = s / 2
 		}
@@ -2916,26 +2912,30 @@ let poly2_class = class poly2 extends Array {
 			let a = this._triangles
 			let n = this.point_count()
 			if (n == 3) { // triangle: nothing to do, push points directly.
-				if (!a)
-					a = [0, 0, 0]
-				else if (a.length != 3)
-					a.length = 3
-				a[0] = 0
-				a[1] = 1
-				a[2] = 2
+				if (!a) {
+					a = [0, 1, 2]
+				} else {
+					if (a.length != 3)
+						a.length = 3
+					a[0] = 0
+					a[1] = 1
+					a[2] = 2
+				}
 			} else if (n == 4 && this.is_convex_quad()) { // convex quad: most common case.
-				if (!a)
-					a = [0, 0, 0, 0, 0, 0]
-				else if (a.length != 6)
-					a.length = 6
-				// triangle 1
-				a[0] = 2
-				a[1] = 3
-				a[2] = 0
-				// triangle 2
-				a[3] = 0
-				a[4] = 1
-				a[5] = 2
+				if (!a) {
+					a = [2, 3, 0, 0, 1, 2]
+				} else {
+					if (a.length != 6)
+						a.length = 6
+					// triangle 1
+					a[0] = 2
+					a[1] = 3
+					a[2] = 0
+					// triangle 2
+					a[3] = 0
+					a[4] = 1
+					a[5] = 2
+				}
 			} else {
 				out.length = n * 2
 				for (let i = 0; i < n; i++) {
@@ -2960,83 +2960,47 @@ let poly2_class = class poly2 extends Array {
 		return out
 	}
 
-	invalidate() {
-		this._triangles = null
-		this._area = null
-		this._center_valid = false
-		this._bbox_valid = false
-		return this
+	// (tex_uv) are 1 / (texture's (u, v) in world space).
+	uv_at(i, uvm, tex_uv, out) {
+		let p0 = this.get_point(0, _v2_0)
+		let pi = this.get_point(i, _v2_1)
+		pi.sub(p0).mul(tex_uv)
+		if (uvm)
+			pi.transform(uvm)
+		out[0] = pi[0]
+		out[1] = pi[1]
+		return out
 	}
 
-}
+	// with a plane, a poly2 can be used in 3D.
 
-let poly2p = poly2_class.prototype
-poly2p.is_poly2 = true
-
-function poly2(...args) { return new poly2_class(...args) }
-poly2.class = poly2_class
-
-poly2.subclass = function(methods) {
-	let cls = class extends Array {
-		constructor(opt, elements) {
-			if (elements)
-				super(...elements)
-			else
-				super()
-			poly2_cons(this, opt, elements)
-		}
-	}
-	// static inheritance (keep lookup chain short).
-	for (let k of Object.getOwnPropertyNames(this.class.prototype))
-		cls.prototype[k] = this.class.prototype[k]
-	assign(cls.prototype, methods)
-	let cons = function(opt, elements) { return new cls(opt, elements) }
-	cons.class = cls
-	cons.subclass = poly.subclass
-	return cons
-}
-
-let poly = poly2
-
-// poly3 ---------------------------------------------------------------------
-
-let poly3_class = poly2.subclass(class poly3_class extends Array {
-
-	get_point() {
-		return out.set(this.get_point3(i, _v0).transform(this.xy_quat()))
-	}
-
-	get_point3(i, out) { // stub: replace based on how the points are stored.
-		return out.from_v3_array(this.points, this[i])
-	}
-
-	// xy_quat projects points on the xy plane for in-plane calculations.
-	xy_quat() {
-		let q = this._xy_quat
-		if (!this._xy_quat_valid) {
-			if (!q) {
-				q = quat()
-				this._xy_quat = q
-			}
-			this._xy_quat_valid = true
-		}
-		return q.set_from_unit_vectors(this.plane().normal, v3.z_axis)
+	set_plane(plane) {
+		this._plane = plane
+		this._xyz_quat_valid = false
 	}
 
 	plane() {
-		let p = this._plane
-		if (!this._plane_valid) {
-			if (!p) {
-				p = plane()
-				this._plane = p
-			}
-			this._plane_valid = true
-		}
-		return p.set_from_poly3(this)
+		return this._plane
 	}
 
-	get_normal(i, out) { // stub: replace based on how normals are stored.
-		return out.set(this.plane().normal)
+	// xyz_quat puts 2D points on the plane.
+	xyz_quat() {
+		let q = this._xyz_quat
+		if (!this._xyz_quat_valid) {
+			if (!q) {
+				q = quat()
+				this._xyz_quat = q
+			}
+			q.set_from_unit_vectors(this.plane().normal, v3.z_axis).invert()
+			this._xyz_quat_valid = true
+		}
+		return q
+	}
+
+	get_point3(i, out) {
+		out[2] = 0
+		this.get_point(i, out)
+		return out.transform(this.xyz_quat())
 	}
 
 	triangle3(ti, out) {
@@ -3048,19 +3012,93 @@ let poly3_class = poly2.subclass(class poly3_class extends Array {
 		return out
 	}
 
-	// (tex_uv) are 1 / (texture's (u, v) in world space).
-	uv_at(i, uvm, tex_uv, out) {
-		let xy_quat = this.xy_quat()
-		let p0 = this.get_point(0)
-		let pi = this.get_point(i)
-		pi.sub(p0).mul(tex_uv)
-		if (uvm)
-			pi.transform(uvm)
-		out[0] = pi[0]
-		out[1] = pi[1]
+	get_normal(i, out) { // stub: replace based on how normals are stored.
+		return out.set(this.plane().normal)
+	}
+
+	invalidate() {
+		this._xyz_quat_valid = false
+		this._triangles = null
+		this._area = null
+		this._center_valid = false
+		this._bbox_valid = false
+		return this
+	}
+
+}
+
+let poly2p = poly2_class.prototype
+
+function poly2(...args) { return new poly2_class(...args) }
+poly2.class = poly2_class
+
+// usage: poly2.subclass(class MyPoly extends Array { ... })
+poly2.subclass = function(cls) {
+	// copy parent methods to prototype (keeps method lookup chain short).
+	for (let k of Object.getOwnPropertyNames(this.class.prototype))
+		if (!(k in cls.prototype)) // not overridden
+			cls.prototype[k] = this.class.prototype[k]
+	// create a functional constructor.
+	let cons = function(...args) { return new cls(...args) }
+	cons.class = cls
+	cons.subclass = poly2.subclass
+	return cons
+}
+
+let poly = poly2
+
+// poly3 ---------------------------------------------------------------------
+
+// a poly3 stores points in 3D. its plane can't be manually set but it's
+// calculated from the points. points in 2D are calculated on access.
+
+let poly2_invalidate = assert(poly2.class.prototype.invalidate)
+
+let poly3 = poly2.subclass(class poly3 extends Array {
+
+	static is_poly3 = true
+
+	get_point(i, out) {
+		let q = this.xy_quat()
+		out.set(this.get_point3(i, _v0).transform(q))
 		return out
 	}
 
+	get_point3(i, out) { // stub: replace based on how the points are stored.
+		return out.from_v3_array(this.points, this[i])
+	}
+
+	set_plane() { assert(false) }
+
+	plane() {
+		let p = this._plane
+		if (!this._plane_valid) {
+			if (!p) {
+				p = plane()
+				this._plane = p
+			}
+			p.set_from_poly3(this)
+			this._plane_valid = true
+		}
+		return p
+	}
+
+	// xy_quat projects points on the xy plane for in-plane calculations.
+	xy_quat() {
+		let q = this._xy_quat
+		if (!this._xy_quat_valid) {
+			if (!q) {
+				q = quat()
+				this._xy_quat = q
+			}
+			let plane = this.plane()
+			q.set_from_unit_vectors(plane.normal, v3.z_axis)
+			this._xy_quat_valid = true
+		}
+		return q
+	}
+
+	// TODO: move to poly2 and use accessors
 	// from https://www.iquilezles.org/www/articles/normals/normals.htm
 	compute_smooth_normals(normals, normalize) {
 
@@ -3105,324 +3143,31 @@ let poly3_class = poly2.subclass(class poly3_class extends Array {
 		return normals
 	}
 
+	center(out) {
+		for (let i = 0, n = this.point_count(); i < n; i++)
+			out.add(this.get_point(i, _v0))
+		let len = this.length
+		out.x /= len
+		out.y /= len
+		out.z /= len
+		return out
+	}
+
 	invalidate() {
 		this._xy_quat_valid = false
 		this._plane_valid = false
-		poly2.prototype.invalidate.call(this)
+		poly2_invalidate.call(this)
 		return this
 	}
 
 })
-
-function poly3(...args) { return new poly3_class(...args) }
-poly3.class = poly3_class
-poly3.subclass = poly2.subclass
-
-/*
-let poly3 = poly2.subclass()
-let poly3p = poly3.prototype
-poly3p.is_poly3 = true
-poly3p.is_poly2 = null
-poly3p.get_point = function() {
-	return out.set(this.get_point3(i, _v0).transform(this.xy_quat()))
-}
-poly3p.get_point3 = function(i, out) { // stub: replace based on how the points are stored.
-	return out.from_v3_array(this.points, this[i])
-}
-*/
-
-/*
-
-// poly3 ---------------------------------------------------------------------
-
-let poly3_cons = function(_this, opt, elements) {
-	assign(_this, opt)
-	_this.invalid = true
-}
-
-let poly3_class = class poly3 extends Array {
-
-	constructor(opt, elements) {
-		if (elements)
-			super(...elements)
-		else
-			super()
-		poly3_cons(this, opt, elements)
-	}
-
-	to(v) {
-		return v.set(this)
-	}
-
-}
-
-let poly3p = poly3_class.prototype
-
-poly3p.is_poly3 = true
-
-let poly3 = function(opt, elements) { return new poly3_class(opt, elements) }
-poly3.class = poly3_class
-
-poly3.subclass = function(methods) {
-	let cls = class poly3 extends Array {
-		constructor(opt, elements) {
-			if (elements)
-				super(...elements)
-			else
-				super()
-			poly3_cons(this, opt, elements)
-		}
-	}
-	assign(cls.prototype, poly3_class.prototype, methods) // static inheritance (keep lookup chain short).
-	let cons = function(opt, elements) { return new cls(opt, elements) }
-	cons.class = cls
-	return cons
-}
-
-// point accessor stubs. replace in subclasses based on how the points are stored.
-poly3p.point_count = function() {
-	return this.length
-}
-poly3p.get_point = function(i, out) {
-	return out.from_v3_array(this.points, this[i])
-}
-poly3p.get_point3 = function(i, out) {
-	return this.get_point(i, out)
-}
-poly3p.get_normal = function(i, out) {
-	return out.set(this.plane().normal)
-}
-
-poly3p.point_count_without_holes = function() {
-	return this.holes?.length ? this.holes[0] : this.point_count()
-}
-
-poly3p._update_plane = function() {
-	let pl = this._plane || plane()
-	this._plane = pl
-	pl.set_from_poly3(this)
-}
-poly3p.plane = function() {
-	return this._update_if_invalid()._plane
-}
-
-// xy_quat projects points on the xy plane for in-plane calculations.
-poly3p._update_xy_quat = function() {
-	if (!this._xy_quat)
-		this._xy_quat = quat()
-	this._xy_quat.set_from_unit_vectors(this._plane.normal, v3.z_axis)
-}
-poly3p.xy_quat = function() {
-	return this._update_if_invalid()._xy_quat
-}
-
-// check if a polygon is a convex quad (the most common case for trivial triangulation).
-{
-	let a = v3()
-	let c = v3()
-	let v = v3()
-	let m = mat3()
-	let cross_sign = function(_a, _b, _c) {
-		v3.sub(_a, _b, a)
-		v3.sub(_c, _b, c)
-		v3.cross(a, c, v)
-		// compute the signed volume between ab, cb and ab x cb.
-		// the sign tells you the direction of the cross vector.
-		m.set(
-			v[0], a[0], c[0],
-			v[1], a[1], c[1],
-			v[2], a[2], c[2]
-		)
-		return sign(m.det())
-	}
-
-	let p0 = v3()
-	let p1 = v3()
-	let p2 = v3()
-	let p3 = v3()
-	poly3p.is_convex_quad = function is_convex_quad() {
-		if (this.point_count() != 4)
-			return false
-		this.get_point(0, p0)
-		this.get_point(1, p1)
-		this.get_point(2, p2)
-		this.get_point(3, p3)
-		let s0 = cross_sign(p0, p1, p2)
-		let s1 = cross_sign(p1, p2, p3)
-		let s2 = cross_sign(p2, p3, p0)
-		let s3 = cross_sign(p3, p0, p1)
-		let sr = abs(s0) >= NEAR ? s0 : s1 // one (and only one) of them can be zero.
-		return (
-			   (s0 == 0 || s0 == sr)
-			&& (s1 == 0 || s1 == sr)
-			&& (s2 == 0 || s2 == sr)
-			&& (s3 == 0 || s3 == sr)
-		)
-	}
-}
-
-poly3p.triangle_count = function() {
-	return 3 * (this.point_count() - 2)
-}
-
-{
-let ps = []
-poly3p._update_triangles = function() {
-	let tri_count = this.triangle_count()
-	let out = this._triangles
-	let pn = this.point_count()
-	if (pn == 3) { // triangle: nothing to do, push points directly.
-		if (!out)
-			out = [0, 0, 0]
-		else if (out.length != 3)
-			out.length = 3
-		out[0] = 0
-		out[1] = 1
-		out[2] = 2
-	} else if (pn == 4 && this.is_convex_quad()) { // convex quad: most common case.
-		if (!out)
-			out = [0, 0, 0, 0, 0, 0]
-		else if (out.length != 6)
-			out.length = 6
-		// triangle 1
-		out[0] = 2
-		out[1] = 3
-		out[2] = 0
-		// triangle 2
-		out[3] = 0
-		out[4] = 1
-		out[5] = 2
-	} else {
-		ps.length = pn * 2
-		let xy_quat = this.xy_quat()
-		for (let i = 0; i < pn; i++) {
-			let p = this.get_point(i, _v0).transform(xy_quat)
-			ps[2*i+0] = p[0]
-			ps[2*i+1] = p[1]
-		}
-		out = earcut(ps, this.holes, 2)
-	}
-	this._triangles = out
-}
-}
-
-poly3p.triangles = function() {
-	return this._update_if_invalid()._triangles
-}
-
-poly3p.triangle = function(ti, out) {
-	assert(out.is_triangle3)
-	let teis = this.triangles()
-	this.get_point(teis[3*ti+0], out[0])
-	this.get_point(teis[3*ti+1], out[1])
-	this.get_point(teis[3*ti+2], out[2])
-	return out
-}
-
-// from https://www.iquilezles.org/www/articles/normals/normals.htm
-{
-let p1 = v3()
-let p2 = v3()
-let p3 = v3()
-poly3p.compute_smooth_normals = function(normals, normalize) {
-
-	let teis = this.triangles()
-	let points = this.points
-	for (let i = 0, n = teis.length; i < n; i += 3) {
-
-		let p1i = this[teis[i+0]]
-		let p2i = this[teis[i+1]]
-		let p3i = this[teis[i+2]]
-
-		p3.from_array(points, 3*p3i)
-		p1.from_array(points, 3*p1i).sub(p3)
-		p2.from_array(points, 3*p2i).sub(p3)
-
-		let p = p1.cross(p2)
-
-		normals[3*p1i+0] += p[0]
-		normals[3*p1i+1] += p[1]
-		normals[3*p1i+2] += p[2]
-
-		normals[3*p2i+0] += p[0]
-		normals[3*p2i+1] += p[1]
-		normals[3*p2i+2] += p[2]
-
-		normals[3*p3i+0] += p[0]
-		normals[3*p3i+1] += p[1]
-		normals[3*p3i+2] += p[2]
-	}
-
-	if (normalize)
-		for (let i = 0, n = normals.length; i < n; i += 3) {
-			p1.from_array(normals, i)
-			p1.normalize()
-			p1.to_array(normals, i)
-		}
-
-	return normals
-}}
-
-{
-let _tri = triangle3()
-poly3p.contains_point = function(p) {
-	for (let ti = 0, tn = this.triangle_count(); ti < tn; ti++)
-		if (this.triangle(ti, _tri).contains_point(p))
-			return true
-	return false
-}
-}
-
-// (tex_uv) are 1 / (texture's (u, v) in world space).
-poly3p.uv_at = function(i, uvm, tex_uv, out) {
-	let xy_quat = this.xy_quat()
-	let p0 = _v2_0.set(this.get_point(0, _v0).transform(xy_quat))
-	let pi = _v2_1.set(this.get_point(i, _v1).transform(xy_quat))
-	pi.sub(p0).mul(tex_uv)
-	if (uvm)
-		pi.transform(uvm)
-	out[0] = pi[0]
-	out[1] = pi[1]
-	return out
-}
-
-poly3p._update_if_invalid = function() {
-	if (this.invalid)
-		this._update()
-	return this
-}
-
-poly3p._update = function() {
-	this.invalid = false
-	this._update_plane()
-	this._update_xy_quat()
-	this._update_triangles()
-	return this
-}
-
-poly3p.invalidate = function() {
-	this.invalid = true
-	return this
-}
-
-poly3p.center = function(out) {
-	for (let i = 0, n = this.point_count(); i < n; i++)
-		out.add(this.get_point(i, _v0))
-	let len = this.length
-	out.x /= len
-	out.y /= len
-	out.z /= len
-	return out
-}
-
-*/
 
 // line2 ---------------------------------------------------------------------
 
 let line2_class = class line2 extends Array {
 
 	constructor(p0, p1) {
-		super(p0 || v2(), p1 || v2())
+		super(p0 ?? v2(), p1 ?? v2())
 	}
 
 	set(p0, p1) {
@@ -3619,7 +3364,7 @@ line2.offset = function line2_offset(d, x1, y1, x2, y2, out) {
 let line3_class = class line3 extends Array {
 
 	constructor(p0, p1) {
-		super(p0 || v3(), p1 || v3())
+		super(p0 ?? v3(), p1 ?? v3())
 	}
 
 	set(p0, p1) {
@@ -3901,7 +3646,10 @@ v3.minus_inf = v3(-inf, -inf, -inf)
 let box3_class = class box3 extends Array {
 
 	constructor(min, max) {
-		super(min || v3.inf.clone(), max || v3.minus_inf.clone())
+		super(
+			min ?? v3.inf.clone(),
+			max ?? v3.minus_inf.clone()
+		)
 	}
 
 	set(min, max) {
@@ -4129,14 +3877,14 @@ box3.triangle_pis_back .max_index = 7
 let camera; {
 let _v4_0 = v4()
 camera = function(e) {
-	e = e || {}
+	e = e ?? {}
 
-	e.pos  = e.pos || v3(-500, 1000, 1000) // v3(-1, 5, 10)
-	e.dir  = e.dir || v3(-.5, .5, .5) // v3(-.5, .5, 1)
-	e.up   = e.up  || v3(0, 1, 0)
+	e.pos  = e.pos ?? v3(-500, 1000, 1000) // v3(-1, 5, 10)
+	e.dir  = e.dir ?? v3(-.5, .5, .5) // v3(-.5, .5, 1)
+	e.up   = e.up  ?? v3(0, 1, 0)
 
-	e.fov  = e.fov || 60
-	e.near = e.near || 0.01
+	e.fov  = e.fov  ?? 60
+	e.near = e.near ?? 0.01
 
 	e.proj = mat4()
 	e.view = mat4()
@@ -4144,7 +3892,7 @@ camera = function(e) {
 	e.inv_view = mat4()
 	e.view_proj = mat4()
 
-	e.view_size = e.view_size || v2()
+	e.view_size = e.view_size ?? v2()
 
 	e.set = function(c) {
 		e.pos.set(c.pos)
