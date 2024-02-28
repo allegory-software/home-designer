@@ -3,18 +3,62 @@
 	Math for undirected planar graphs.
 	Written by Cosmin Apreutesei. Public Domain.
 
-	plane_graph(e) -> e
+	plane_graph() -> pg
 
-		ps -> [p1,...]
-		segs -> [[s1p1,s1p2],...]
-		comps -> [comp1,...]
-		root_comps -> [comp1,...]
+		orthogonal <- t|f
 
-		init()
+		ps -> [p1, ...]                   points
+		segs -> [[s1p1, s1p2], ...]       segments
+		comps -> [comp1,...]              all components in no order
+		[comp1,...]                       root components i.e. root islands
+
+		comp: {}
+			.ps -> [p1, ...]
+			.segs -> [seg1, ...]
+			.cycles -> [cycle1, ...]
+			.outer_cycle -> cycle
+			.islands -> [comp1, ...]
+
+		cycle: poly2[p1, ...]
+			.islands -> [comp1, ...]
+			.outer -> t|f
+			.comp -> comp
+
+		free()
+
+		clear()
+
+		add_point(x, y, [id])
+		rem_point(p)
+		rem_points(cond, [msg])
+
+		add_seg(p1, p2, [id])
+		rem_seg(seg)
+		rem_segs(cond, [msg])
+		set_seg_point(seg, i, p) -> old_p
+
+		add(pg)
+		set(pg)
+
+		load([json_point1,...], [json_seg_run1,...])
+
+			json_point formats:
+
+				[x,y[,id]]
+				{x:, y:, id: id}
+
+			json_seg_run formats:
+
+				['draw', [id, ]x0, y0, [id, ]d-to-right, [id, ]d-to-down, [id, ]d-to-right, ...]
+				['connect', p1, p2, ...]
+				[[seg_id, ]p1, p2, ...]
+
 		fix()
 
+		hit_cycle(x, y, cycle) -> t|f
 		hit_cycles(x, y) -> cycle|null
 
+		next_adj(p0, p, clockwise, [max_angle]) -> p1
 
 */
 
@@ -22,21 +66,17 @@
 "use strict"
 const G = window
 
-// utilities -----------------------------------------------------------------
-
 const {
 	inf,
 	mod,
+	freelist,
 } = glue
 
 const {
 	v2,
 } = Math3D
 
-let v2_near = v2.near
-
-let next_id = 1
-function gen_id() { return next_id++ } // stub
+const v2_near = v2.near
 
 // cycle base extaction algorihm ---------------------------------------------
 //
@@ -150,8 +190,10 @@ function poly_get_point(i, out) {
 	return out
 }
 
+let cycle_freelist = freelist(() => poly())
+
 function closed_walk(first, outer_cycle) {
-	let walk = poly()
+	let walk = cycle_freelist.alloc()
 	walk.get_point = poly_get_point
 	let curr = first
 	let prev
@@ -176,15 +218,16 @@ function closed_walk(first, outer_cycle) {
 	return walk
 }
 
-function extract_cycles_for(comp, init_cycle) {
+function extract_cycles_for(comp, pg) {
 	let ps = [...comp.ps]
 	while (ps.length > 0) {
 		let p = left_bottom_point(ps)
 		let c = closed_walk(p)
-		if (c[1] != c[c.length-1]) { // not started with a filament
+		let add = c[1] != c[c.length-1] // not started with a filament
+		if (add) {
 			c.comp = comp
 			comp.cycles.push(c)
-			init_cycle(c)
+			pg._init_cycle(c)
 		}
 		// the first edge is always safe to remove because starting from the leftmost
 		// point means that there cannot be a cycle to the right of that first edge
@@ -194,10 +237,12 @@ function extract_cycles_for(comp, init_cycle) {
 		// that we must remove too.
 		rem_filament(c[0], ps)
 		rem_filament(c[1], ps)
+		if (!add)
+			pg._free_cycle(c)
 	}
 }
 
-function extract_outer_cycle_for(comp, init_cycle) {
+function extract_outer_cycle_for(comp) {
 	let p = left_bottom_point(comp.ps)
 	let c = closed_walk(p, true)
 	c.reverse() // outer cycle must go clockwise
@@ -205,19 +250,10 @@ function extract_outer_cycle_for(comp, init_cycle) {
 	c.comp = comp
 	comp.cycles.push(c)
 	comp.outer_cycle = c
-	init_cycle(c)
+	return c
 }
 
 // house plan model utils ----------------------------------------------------
-
-function line_middle(p1, p2) {
-	let [x1, y1] = p1
-	let [x2, y2] = p2
-	return [
-		(x2 + x1) / 2,
-		(y2 + y1) / 2,
-	]
-}
 
 function is_v(seg) { return seg[0][0] == seg[1][0] }
 
@@ -258,10 +294,6 @@ function seg_i2(seg) { let mi = is_v(seg) ? 1 : 0; return seg[0][mi] < seg[1][mi
 function seg_p1(seg) { return seg[seg_i1(seg)] }
 function seg_p2(seg) { return seg[seg_i2(seg)] }
 
-function seg_center(seg) {
-	return line_middle(seg[0], seg[1])
-}
-
 // plane graph class ---------------------------------------------------------
 
 let point_freelist = freelist(function() {
@@ -276,82 +308,113 @@ let seg_freelist = freelist(function() {
 	return seg
 })
 
-function plane_graph(e) {
+let comp_freelist = freelist(function() {
+	let comp = {}
+	comp.ps = []
+	comp.cycles = []
+	comp.segs = []
+	comp.islands = []
+	return comp
+})
 
-	e.ps = []
-	e.segs = []
-	e.comps = []
-	e.root_comps = []
+let pg_freelist = freelist(function() {
+	return new plane_graph_class()
+})
 
-	let gen_id = e.gen_id ?? gen_id
-	let ps = e.ps
-	let ps_ids = map()
-	let segs = e.segs
-	let comps = e.comps
-	let root_comps = e.root_comps
+let next_id = 1
 
-	function rebuild_adj_refs() {
-		for (let p of ps)
-			p.adj.length = 0
-		for (let p of ps)
-			for (let seg of p.segs)
-				p.adj.push(seg[1-seg_pi(seg, p)])
+let plane_graph_class = class G extends Array {
+
+	static is_plane_graph = true
+
+	constructor() {
+		super()
+		this.ps = []
+		this.segs = []
+		this.comps = []
 	}
 
-	e.next_adj = next_adj
+	add(pg, opt) {
+		asset(pg.is_plane_graph)
+		for (let p of pg.ps)
+			add_point(p[0], p[1])
+		for (let seg of pg.segs)
+			add_seg(seg[0], seg[1])
+		return this
+	}
+
+	set(pg) {
+		this.clear()
+		return this.add(pg)
+	}
+
+	gen_id() { return next_id++ } // stub
+
+	to(i, out) { return out.set(this.ps[i]) }
+	at(i) { return this.ps[i] }
+
+	next_adj(p0, p, clockwise, max_a) {
+		return next_adj(p0, p, clockwise, max_a)
+	}
 
 	// model editing -------------------------------------------------------
 
-	let p = point_freelist.alloc()
-
-	function add_point(x, y, id) {
+	add_point(x, y, id) {
 		let p = point_freelist.alloc()
 		p[0] = x
 		p[1] = y
-		p.i = id ?? gen_id('point')
-		ps_ids.set(p.i, p)
-		ps.push(p)
-		log('point added:', p.i, ':', x, y)
+		p.id = id ?? this.gen_id('point')
+		if (this.ps_ids)
+			this.ps_ids.set(p.id, p)
+		this.ps.push(p)
+		log('+point:', p.id, ':', x, y)
 		return p
 	}
-	e.add_point = add_point
 
-	function rem_points(cond, msg) {
-		let a = []
-		remove_values(ps, function(p) {
+	_free_point(p) {
+		if (this.ps_ids)
+			this.ps_ids.delete(p.id)
+		p.adj.length = 0
+		p.segs.length = 0
+		point_freelist.free(p)
+	}
+
+	rem_point(p) { // NOTE: O(n)
+		remove_value(this.ps, p)
+		if (this.ps_ids?.size)
+			this.ps_ids.delete(p.id)
+		this._free_point(p)
+	}
+
+	rem_points(cond, msg) {
+		let a = log && []
+		let self = this
+		remove_values(this.ps, function(p) {
 			if (!cond(p))
 				return
-			a.push(p.i)
-			ps_ids.delete(p.i)
-			p.adj.length = 0
-			p.segs.length = 0
-			point_freelist.free(p)
+			if (a) a.push(p.id)
+			self._free_point(p)
 			return true
 		})
-		if (a.length)
+		if (a?.length)
 			log(msg ?? 'points', 'removed:', ...a)
 	}
 
-	function add_seg_refs(seg) {
+	add_seg(p1, p2, id) {
+		let seg = seg_freelist.alloc()
+		seg[0] = p1
+		seg[1] = p2
+		seg.id = id ?? this.gen_id('seg')
+		this.segs.push(seg)
 		seg[0].segs.push(seg)
 		seg[1].segs.push(seg)
 		seg[0].adj.push(seg[1])
 		seg[1].adj.push(seg[0])
-	}
-
-	function add_seg(p1, p2, id) {
-		let seg = seg_freelist.alloc()
-		seg[0] = p1
-		seg[1] = p2
-		seg.i = id ?? gen_id('seg')
-		segs.push(seg)
-		add_seg_refs(seg)
-		log('seg added:', seg.i, ':', seg[0].i, seg[1].i)
+		log('+seg:', seg.id, ':', seg[0].id, seg[1].id)
 		return seg
 	}
-	e.add_seg = add_seg
 
-	function rem_seg_refs(seg) {
+	_free_seg(seg) {
 		remove_value(seg[0].segs, seg)
 		remove_value(seg[1].segs, seg)
 		remove_value(seg[0].adj, seg[1])
@@ -359,31 +422,28 @@ function plane_graph(e) {
 		seg[0] = null
 		seg[1] = null
 		seg_freelist.free(seg)
-		log('seg removed:', seg.i)
+		log('-seg:', seg.id)
 	}
 
-	function rem_seg(seg) {
-		rem_seg_refs(seg)
-		remove_value(segs, seg)
+	rem_seg(seg) { // NOTE: O(n)
+		remove_value(this.segs, seg)
+		this._free_seg(seg)
 	}
 
-	function rem_segs(cond, msg) {
-		let a = []
-		remove_values(segs, function(seg) {
+	rem_segs(cond, msg) {
+		let a = log && []
+		let self = this
+		remove_values(this.segs, function(seg) {
 			if (!cond(seg)) return
-			a.push(seg.i)
-			rem_seg_refs(seg)
+			if (a) a.push(seg.id)
+			self._free_seg(seg)
 			return true
 		})
-		if (log && a.length)
+		if (a?.length)
 			log(msg ?? 'segs', 'removed:', ...a)
 	}
 
-	function rem_marked_segs(msg) {
-		rem_segs(seg => seg.removed, msg)
-	}
-
-	function set_seg_point(seg, i, p) {
+	set_seg_point(seg, i, p) {
 		let old_p = seg[i]
 		let other_p = seg[1-i]
 		remove_value(old_p.segs, seg)
@@ -392,33 +452,49 @@ function plane_graph(e) {
 		remove_value(old_p.adj, other_p)
 		p.adj.push(other_p)
 		seg[i] = p
-		log('seg end moved:', seg.i, '/', i, ':', old_p.i, '->', p.i)
+		log('~seg:', seg.id, '/', i, ':', old_p.id, '->', p.id)
 		return old_p
 	}
-	e.set_seg_point = set_seg_point
+
+	clear() {
+		if (this.ps_ids)
+			this.ps_ids.clear()
+		for (let p of this.ps)
+			this._free_point(p)
+		for (let seg of this.segs)
+			this._free_seg(seg)
+		this.ps.length = 0
+		this.segs.length = 0
+		this._free_comps()
+		this.length = 0
+	}
+
+	free() {
+		this.clear()
+		pg_freelist.free(this)
+	}
 
 	// model loading ----------------------------------------------------------
 
-	function add_json_point(p) { // [x,y[,id]] | {x:, y:, i: id}
+	_add_json_point(p) { // [x,y[,id]] | {x:, y:, i: id}
 		if (isarray(p))
-			return add_point(p[0], p[1], p[2])
+			return this.add_point(p[0], p[1], p[2])
 		else if (isobj(p))
-			return add_point(p.x, p.y, p.i)
+			return this.add_point(p.x, p.y, p.id)
 		else
 			check(false, 'invalid point', p)
 	}
 
-	function point_ref(p) { // idx | id | json_point
+	_point_ref(p) { // idx | id | json_point
 		if (isnum(p))
-			return check(ps[p], 'invalid point index', p)
+			return check(this.ps[p], 'invalid point index', p)
 		else if (isstr(p))
-			return check(ps_ids.get(p), 'invalid point id', p, '('+typeof p+')')
+			return check(this.ps_ids.get(p), 'invalid point id', p, '('+typeof p+')')
 		else
-			return add_json_point(p)
+			return this._add_json_point(p)
 	}
-	e.point_ref = point_ref
 
-	function add_segs(a) {
+	add_segs(a) {
 		if (isstr(a))
 			a = words(a)
 		if (a[0] == 'draw') { // ['draw', [id, ]x0, y0, [id, ]d-to-right, [id, ]d-to-down, [id, ]d-to-right, ...]
@@ -434,15 +510,15 @@ function plane_graph(e) {
 				else if (x0 == null) {
 					x0 = m
 				} else if (p0 == null) {
-					p0 = add_point(x0, m, id)
+					p0 = this.add_point(x0, m, id)
 					id = null
 				} else {
 					if (m) { // 0 means skip so we can change direction back
 						let x = p0[0] + m * sx
 						let y = p0[1] + m * sy
-						let p = add_point(x, y, id)
+						let p = this.add_point(x, y, id)
 						id = null
-						add_seg(p0, p)
+						this.add_seg(p0, p)
 						p0 = p
 					}
 					sx = 1-sx
@@ -451,11 +527,11 @@ function plane_graph(e) {
 				i++
 			}
 		} else if (a[0] == 'connect') { // ['connect', p1, p2, ...]
-			let p0 = point_ref(a[1])
+			let p0 = this._point_ref(a[1])
 			for (let i = 2, n = a.length; i < n; i++) {
-				let p1 = point_ref(a[i])
+				let p1 = this._point_ref(a[i])
 				if (p0 && p1)
-					add_seg(p0, p1)
+					this.add_seg(p0, p1)
 				p0 = p1
 			}
 		} else if (isarray(a[0])) { // [[seg_id, ]p1, p2, ...]
@@ -467,10 +543,10 @@ function plane_graph(e) {
 				if (isstr(p)) {
 					id = p
 				} else if (!p1) {
-					p1 = point_ref(p)
+					p1 = this._point_ref(p)
 				} else {
-					let p2 = point_ref(p)
-					add_seg(p1, p2, id)
+					let p2 = this._point_ref(p)
+					this.add_seg(p1, p2, id)
 					p1 = null
 					p2 = null
 					id = null
@@ -480,25 +556,51 @@ function plane_graph(e) {
 		}
 	}
 
+	load(points, segs) {
+
+		this.clear()
+
+		if (!this.ps_ids)
+			this.ps_ids = map()
+
+		if (points)
+			for (let p of points)
+				this._add_json_point(p)
+
+		if (segs)
+			for (let a of segs)
+				this.add_segs(a)
+
+		return this
+	}
+
 	// model fixing --------------------------------------------------------
 
-	function remove_isolated_points() {
-		rem_points(p => p.adj.length == 0, 'isolated points')
+	_rebuild_adj_refs() {
+		for (let p of this.ps)
+			p.adj.length = 0
+		for (let p of this.ps)
+			for (let seg of p.segs)
+				p.adj.push(seg[1-seg_pi(seg, p)])
 	}
 
-	function remove_null_segs() {
-		rem_segs(seg => v2_near(seg[0], seg[1]), 'null segs')
+	_remove_isolated_points() {
+		this.rem_points(p => p.adj.length == 0, 'isolated points')
 	}
 
-	function remove_angled_segs() {
-		if (!e.orthogonal)
+	_remove_null_segs() {
+		this.rem_segs(seg => v2_near(seg[0], seg[1]), 'null segs')
+	}
+
+	_remove_angled_segs() {
+		if (!this.orthogonal)
 			return
-		rem_segs(seg => seg[0][0] != seg[1][0] && seg[0][1] != seg[1][1], 'angled segs')
+		this.rem_segs(seg => seg[0][0] != seg[1][0] && seg[0][1] != seg[1][1], 'angled segs')
 	}
 
 	// NOTE: assumes segs are sorted, null segs removed, points deduplicated.
-	function merge_colinear_segs() {
-		for (let p of ps) {
+	_merge_colinear_segs() {
+		for (let p of this.ps) {
 			if (p.adj.length == 2) {
 				let p0 = p.adj[0]
 				let p2 = p.adj[1]
@@ -508,9 +610,9 @@ function plane_graph(e) {
 					let s2 = p.segs[1]
 					let s1_pi = seg_pi(s1, p)
 					let s2_p2 = s2[1-seg_pi(s2, p)]
-					push_log('merging segs:', s1.i, '+', s2.i, '=>', s1.i)
-					set_seg_point(s1, s1_pi, s2_p2)
-					rem_seg(s2)
+					push_log('merging segs:', s1.id, '+', s2.id, '=>', s1.id)
+					this.set_seg_point(s1, s1_pi, s2_p2)
+					this.rem_seg(s2)
 
 					pop_log()
 				}
@@ -520,24 +622,24 @@ function plane_graph(e) {
 
 	// shortens seg at m with new point and adds new seg without detaching the original seg's end-points.
 	// TODO: generalize to angled segs.
-	function split_seg_at(seg, m) {
-		push_log('seg split:', seg.i, '@', m)
+	split_seg_at(seg, m) {
+		push_log('-/-seg:', seg.id, '@', m)
 		let m1 = seg_m1(seg)
 		let m2 = seg_m2(seg)
 		let x = is_v(seg) ? seg_x1(seg) : m
 		let y = is_v(seg) ? m : seg_y1(seg)
-		let new_p = add_point(x, y)
-		let old_p = set_seg_point(seg, seg_i2(seg), new_p)
-		let new_seg = add_seg(new_p, old_p)
+		let new_p = this.add_point(x, y)
+		let old_p = this.set_seg_point(seg, seg_i2(seg), new_p)
+		let new_seg = this.add_seg(new_p, old_p)
 		pop_log()
 	}
 
 	// TODO: generalize to angled segs.
-	function split_intersecting_segs_on(v) {
+	_split_intersecting_segs_on(v) {
 		push_log('split all intersecting segs')
-		for (let seg1 of segs) {
+		for (let seg1 of this.segs) {
 			if (is_v(seg1) == v) {
-				for (let seg2 of segs) {
+				for (let seg2 of this.segs) {
 					if (is_v(seg2) != v) {
 						let m1  = seg_m1(seg1)
 						let m2  = seg_m2(seg1)
@@ -550,7 +652,7 @@ function plane_graph(e) {
 							// be also tested in the outer loop and possibly split further.
 							// the shortened seg is potentially split multiple times
 							// in this inner loop.
-							split_seg_at(seg1, ba)
+							this.split_seg_at(seg1, ba)
 						}
 					}
 				}
@@ -558,29 +660,29 @@ function plane_graph(e) {
 		}
 		pop_log()
 	}
-	function split_intersecting_segs() {
-		split_intersecting_segs_on(0)
-		split_intersecting_segs_on(1)
+	_split_intersecting_segs() {
+		this._split_intersecting_segs_on(0)
+		this._split_intersecting_segs_on(1)
 	}
 
 	// NOTE: leaves isolated points behind.
-	function points_cmp(p1, p2) {
+	_points_cmp(p1, p2) {
 		let dx = p1[0] - p2[0]; if (dx) return dx
 		let dy = p1[1] - p2[1]; if (dy) return dy
-		return p1.i - p2.i
+		return p1.id - p2.id
 	}
-	function deduplicate_points() {
+	_deduplicate_points() {
 		push_log('deduplicate all points')
-		ps.sort(points_cmp)
+		this.ps.sort(this._points_cmp)
 		let p0
-		for (let i = 0; i < ps.length; i++) {
-			let p = ps[i]
+		for (let i = 0; i < this.ps.length; i++) {
+			let p = this.ps[i]
 			if (p0 && v2_near(p, p0)) {
 				for (let j = 0; j < p.segs.length; j++) { // each connected seg
 					let seg = p.segs[j]
 					for (let i = 0; i < 2; i++) // each seg end
 						if (seg[i] == p) {
-							set_seg_point(seg, i, p0, 'seg end point dedup')
+							this.set_seg_point(seg, i, p0, 'seg end point dedup')
 							j-- // because seg was just removed from p.segs
 						}
 				}
@@ -593,9 +695,9 @@ function plane_graph(e) {
 
 	// TODO: generalize to angled segs.
 	// NOTE: requires no intersecting segments.
-	function break_overlapping_segs() {
+	_break_overlapping_segs() {
 		push_log('breaking overlapping colinear segs')
-		segs.sort(function(s1, s2) {
+		this.segs.sort(function(s1, s2) {
 			// level 1 grouping by direction
 			let v1 = is_v(s1)
 			let v2 = is_v(s2)
@@ -614,8 +716,8 @@ function plane_graph(e) {
 			return c1 - c2
 		})
 		let i0, v0, m0
-		for (let i = 0, n = segs.length; i <= n; i++) {
-			let seg = segs[i]
+		for (let i = 0, n = this.segs.length; i <= n; i++) {
+			let seg = this.segs[i]
 			let v = seg ? is_v(seg) : null
 			let m = seg ? seg_axis(seg) : null
 			if (v0 == null) {
@@ -625,8 +727,8 @@ function plane_graph(e) {
 			} else if (v != v0 || m != m0) {
 				if (i >= i0 + 2) { // there's at least 2 segments on this axis
 					for (let j = i0+1; j < i; j++) {
-						let seg1 = segs[j]
-						let seg0 = segs[j-1]
+						let seg1 = this.segs[j]
+						let seg0 = this.segs[j-1]
 						let m1_1 = seg_m1(seg1)
 						let m2_0 = seg_m2(seg0)
 						if (m1_1 < m2_0) {
@@ -634,8 +736,8 @@ function plane_graph(e) {
 							// or they wouldn't be overlapping the seg, so it's safe
 							// to remove the overlapping seg as long as we elongate
 							// the overlapped seg.
-							log('segs overlap:', seg0.i, seg1.i, ':', m1_1, '<=', m2_0,
-								'; seg removed:', seg1.i, '; seg', seg0.i, '.m2 set to:', seg_m2(seg1))
+							log('segs overlap:', seg0.id, seg1.id, ':', m1_1, '<=', m2_0,
+								'; seg removed:', seg1.id, '; seg', seg0.id, '.m2 set to:', seg_m2(seg1))
 							seg1.removed = true
 							set_seg_m2(seg0, max(seg_m2(seg1), seg_m2(seg0)))
 						}
@@ -646,30 +748,45 @@ function plane_graph(e) {
 				m0 = m
 			}
 		}
-		rem_marked_segs()
+		this.rem_segs(seg => seg.removed)
 		pop_log()
 	}
 
 	// finding graph components --------------------------------------------
 
-	function add_comp() {
-		let comp = {}
-		comp.i = gen_id('comp')
-		comp.ps = []
-		comp.cycles = []
-		comp.segs = []
-		comp.islands = []
-		comps.push(comp)
+	_add_comp() {
+		let comp = comp_freelist.alloc()
+		comp.id = this.gen_id('comp')
+		this.comps.push(comp)
 		return comp
 	}
 
-	// NOTE: needs adj refs
-	function find_comps() {
+	_free_comp(comp) {
+		comp.id = null
+		comp.inside = null
+		comp.parent = null
+		comp.ps.length = 0
+		for (let cycle of comp.cycles)
+			this._free_cycle(cycle)
+		comp.cycles.length = 0
+		comp.segs.length = 0
+		comp.islands.length = 0
+		comp_freelist.free()
+	}
 
-		for (let p of ps)
+	_free_comps() {
+		for (let comp of this.comps)
+			this._free_comp(comp)
+		this.comps.length = 0
+	}
+
+	// NOTE: needs adj refs
+	_find_comps() {
+
+		for (let p of this.ps)
 			p.visited = false
 
-		comps.length = 0
+		this._free_comps()
 
 		function dfs(p, ps, segs) {
 			p.visited = true
@@ -681,13 +798,13 @@ function plane_graph(e) {
 					dfs(p, ps, segs)
 		}
 
-		for (let p of ps) {
+		for (let p of this.ps) {
 			if (!p.visited) {
-				let comp = add_comp()
+				let comp = this._add_comp()
 				let segs = set()
 				dfs(p, comp.ps, segs)
 				comp.segs = set_toarray(segs)
-				log('comp:', comp.i, ':', comp.i, ...comp.ps.map(p=>p.i))
+				log('+comp:', comp.id, ':', comp.id, ...comp.ps.map(p=>p.id))
 			}
 		}
 
@@ -695,34 +812,37 @@ function plane_graph(e) {
 
 	// finding which components are inside islands ----------------------------
 
-	function is_comp_inside_poly(c, poly) { // comp inside poly check
+	_is_comp_inside_poly(c, poly) { // comp inside poly check
 		if (!c.bb.inside_bbox2(...poly.bbox()))
 			return false
 		return poly.hit(c.ps[0][0], c.ps[0][1])
 	}
 
-	function is_comp_inside_comp(c, p) { // comp inside comp check
-		return is_comp_inside_poly(c, p.outer_cycle)
+	_is_comp_inside_comp(c, p) { // comp inside comp check
+		return this._is_comp_inside_poly(c, p.outer_cycle)
 	}
 
-	function is_comp_inside_cycle(co, cy) { // comp inside cycle check
-		return is_comp_inside_poly(co, cy, cy.bbox())
+	_is_comp_inside_cycle(co, cy) { // comp inside cycle check
+		return this._is_comp_inside_poly(co, cy, cy.bbox())
 	}
 
 	// NOTE: O(n^2)
-	function is_comp_directly_inside_comp(c, p) { // comp directly inside comp check
-		if (!is_comp_inside_comp(c, p))
+	_is_comp_directly_inside_comp(c, p) { // comp directly inside comp check
+		if (!this._is_comp_inside_comp(c, p))
 			return false
-		for (let q of comps)
-			if (q != c && q != p && q.inside && is_comp_inside_comp(c, q) && is_comp_inside_comp(q, p))
+		for (let q of this.comps)
+			if (q != c && q != p && q.inside
+				&& this._is_comp_inside_comp(c, q)
+				&& this._is_comp_inside_comp(q, p)
+			)
 				return false
 		return true
 	}
 
-	function find_inside_comps() {
+	_find_inside_comps() {
 
 		// point-based bbox: enough for computing inside flag.
-		for (let c of comps) {
+		for (let c of this.comps) {
 			c.inside = false
 			c.parent = null
 			c.islands.length = 0
@@ -732,24 +852,24 @@ function plane_graph(e) {
 		}
 
 		// set inside flag with O(n^2) in order to lower the n for the O(n^4) loop below.
-		root_comps.length = 0
-		for (let c of comps) {
-			for (let p of comps) {
-				if (p != c && is_comp_inside_comp(c, p)) {
+		this.length = 0
+		for (let c of this.comps) {
+			for (let p of this.comps) {
+				if (p != c && this._is_comp_inside_comp(c, p)) {
 					c.inside = true
 					break
 				}
 			}
 			if (!c.inside)
-				root_comps.push(c)
+				this.push(c)
 		}
 
 		// NOTE: O(n^4) but only checks islands which should be rare.
-		for (let c of comps) {
+		for (let c of this.comps) {
 			if (!c.inside)
 				continue
-			for (let p of comps) {
-				if (p != c && is_comp_directly_inside_comp(c, p)) {
+			for (let p of this.comps) {
+				if (p != c && this._is_comp_directly_inside_comp(c, p)) {
 					c.parent = p
 					p.islands.push(c)
 				}
@@ -757,15 +877,15 @@ function plane_graph(e) {
 		}
 
 		// assign islands to inner cycles.
-		for (let comp of comps) {
+		for (let comp of this.comps) {
 			for (let cycle of comp.cycles) {
 				if (cycle.outer)
 					continue
-				cycle.islands = []
+				cycle.islands.length = 0
 				for (let icomp of comp.islands) {
-					if (is_comp_inside_cycle(icomp, cycle)) {
+					if (this._is_comp_inside_cycle(icomp, cycle)) {
 						cycle.islands.push(icomp)
-						log('comp', icomp.i, 'is inside comp', comp.i, 'cycle', cycle.i)
+						log('comp', icomp.id, 'is inside comp', comp.id, 'cycle', cycle.id)
 					}
 				}
 			}
@@ -775,104 +895,104 @@ function plane_graph(e) {
 
 	// finding the cycle base -------------------------------------------------
 
-	function init_cycle(c) {
-		c.i = gen_id('cycle')
+	_init_cycle(c) {
+		c.id = this.gen_id('cycle')
 		c.area_pos = [...c.center()]
+		c.islands = []
+		log('+cycle', c.comp.id, '/', c.id,
+			is_cw(c) ? 'cw' : 'ccw',
+			c.outer ? 'outer' : '',
+			c.inside ? 'inside' : '',
+			':', ...c.map(p=>p.id))
 	}
 
-	function extract_cycles() {
+	_free_cycle(c) {
+		c.id = null
+		c.length = 0
+		c.comp = null
+		if (c.islands)
+			c.islands.length = 0
+		c.outer = null
+		cycle_freelist.free(c)
+	}
 
-		for (let c of comps)
+	_extract_cycles() {
+
+		push_log('extracting cycles')
+
+		for (let c of this.comps)
 			c.cycles.length = 0
 
-		for (let c of comps)
-			extract_outer_cycle_for(c, init_cycle)
-		rebuild_adj_refs()
+		for (let c of this.comps) {
+			let cy = extract_outer_cycle_for(c)
+			this._init_cycle(cy)
+		}
+		this._rebuild_adj_refs()
 
-		for (let c of comps)
-			extract_cycles_for(c, init_cycle)
-		rebuild_adj_refs()
+		for (let c of this.comps)
+			extract_cycles_for(c, this)
+		this._rebuild_adj_refs()
 
-		if (1)
-		for (let co of comps)
-			for (let c of co.cycles)
-				log('cycle', co.i, '/', c.i,
-					is_cw(c) ? 'cw' : 'ccw',
-					c.outer ? 'outer' : '',
-					c.inside ? 'inside' : '',
-					':', ...c.map(p=>p.i)
-				)
+		pop_log()
 	}
 
 	// hit testing ------------------------------------------------------------
 
-	function hit_cycle(x, y, c) {
-		if (c.outer)
+	hit_cycle_edges_of_cycle(x, y, cy) {
+		if (cy.outer)
 			return
-		if (!c.edges.bbox().hit(x, y))
+		if (!cy.edges.bbox().hit(x, y))
 			return
-		for (let icomp of c.islands) {
-			for (let c1 of icomp.cycles) {
-				let c2 = hit_cycle(x, y, c1)
-				if (c2)
-					return c2
-			}
+		for (let comp of cy.islands) {
+			let cy = this.hit_cycle_edges_of_island(x, y, comp)
+			if (cy)
+				return cy
 		}
-		if (!c.edges.hit(x, y))
+		if (!cy.edges.hit(x, y))
 			return
-		return c
+		return cy
 	}
-	function hit_cycles(x, y) {
-		for (let co of comps) {
-			for (let c of co.cycles) {
-				let hit_c = hit_cycle(x, y, c)
-				if (hit_c)
-					return hit_c
-			}
+
+	hit_cycle_edges_of_island(x, y, comp) {
+		for (let cy of comp.cycles) {
+			let hit_cy = this.hit_cycle_edges_of_cycle(x, y, cy)
+			if (hit_cy)
+				return hit_cy
 		}
 	}
-	e.hit_cycles = hit_cycles
+
+	hit_cycle_edges(x, y) {
+		for (let comp of this) {
+			let cy = this.hit_cycle_edges_of_island(x, y, comp)
+			if (cy)
+				return cy
+		}
+	}
 
 	// plan loading & validation -------------------------------------------
 
-	e.after_fix = noop
-	function fix() {
-		split_intersecting_segs()
-		break_overlapping_segs()
-		remove_null_segs()
-		deduplicate_points()
-		rebuild_adj_refs()
-		merge_colinear_segs()
-		remove_isolated_points()
-		find_comps()
-		extract_cycles()
-		find_inside_comps()
-		e.after_fix()
+	_after_fix() {} // stub
+
+	fix() {
+		this._split_intersecting_segs()
+		this._break_overlapping_segs()
+		this._remove_null_segs()
+		this._deduplicate_points()
+		this._rebuild_adj_refs()
+		this._merge_colinear_segs()
+		this._remove_isolated_points()
+		this._find_comps()
+		this._extract_cycles()
+		this._find_inside_comps()
+		this._after_fix()
+		return this
 	}
-	e.fix = fix
 
-	// init -------------------------------------------------------------------
-
-	function init() {
-
-		if (e.points)
-			for (let p of e.points)
-				add_json_point(p)
-
-		if (e.lines)
-			for (let a of e.lines)
-				add_segs(a)
-
-		remove_angled_segs()
-
-	}
-	e.init = init
-
-	return e
 }
 
-// publishing ----------------------------------------------------------------
-
-G.plane_graph = plane_graph
+G.plane_graph = function() {
+	return pg_freelist.alloc()
+}
+G.plane_graph.class = plane_graph_class
 
 }()) // module scope.

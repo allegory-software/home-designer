@@ -643,7 +643,7 @@ function modeleditor(e) {
 			let axis = _l0.set(v3.origin, main_axis).transform(model)
 			camera.world_to_screen(axis[0], _l1[0])
 			camera.world_to_screen(axis[1], _l1[1])
-			let int_p = _l1.closest_point_to_point(mouse, false, out)
+			let int_p = _l1.project_point(mouse, false, out)
 			if (!int_p)
 				return
 
@@ -1609,7 +1609,7 @@ function modeleditor(e) {
 			let p = mouse_hit_model({mode: 'draw', distance: 'snap'})
 			let hit_model = p && pull.can_hit(p)
 			if (hit_model) {
-				p = pull.line.closest_point_to_point(p, false, _v0)
+				p = pull.line.project_point(p, false, _v0)
 			} else {
 				let int_line = mouse.ray.intersect_line(pull.line, _line0)
 				p = int_line && int_line[1].to(_v0)
@@ -2324,6 +2324,43 @@ function modeleditor(e) {
 
 	}
 
+	let project_wall_to_roof_face
+	{
+	let l3 = line3()
+	let l2 = line2()
+	let v2_0 = v2()
+	let v2_1 = v2()
+	function wall_edge(wp) {
+		let [x, y] = wp
+		l3[0].set(x, 0, y)
+		l3[1].set(x, 1, y)
+		return l3
+	}
+	project_wall_to_roof_face = function(wall, wp1, wp2, face) {
+		face.plane().intersect_line(wall_edge(wp1), l3[0])
+		face.plane().intersect_line(wall_edge(wp2), l3[1])
+		l3.transform(face.xy_quat())
+		l2.set(l3)
+		// pr([...wp1], [...wp2], p1.clone(), p2.clone())
+		let ts = l2.split_by_poly(face, 'inside', [])
+		// pr(p1.clone(), p2.clone(), l2.clone(), face, clone(ts))
+		for (let i = 0, n = ts.length; i < n; i += 2) {
+			let t1 = ts[i+0]
+			let t2 = ts[i+1]
+			let [p1, p2] = l3
+			p1.set(0, 0, 0)
+			p2.set(0, 0, 0)
+			l2.at(t1, p1)
+			l2.at(t2, p2)
+			l3.transform(face.xyz_quat())
+			p1 = p1.clone()
+			p2 = p2.clone()
+			// points.push(p1, p2)
+			// segs.push([p1, p2])
+		}
+	}
+	}
+
 	function create_plan() {
 		for (let floor of house.floors) {
 
@@ -2422,12 +2459,30 @@ function modeleditor(e) {
 
 					let c = e.create_component({name: 'roof_'+floor.i})
 					c.set(m)
-
-					for (let f of c.faces) {
-							//
-					}
+					roof.comp = c
 
 					root.comp.add_child(c, mat4())
+
+					for (let fcomp of floor.comps) {
+						for (let cycle of fcomp.cycles) {
+							let a = cycle.edges
+							let n = a.length
+							let p1 = a[n-1]
+							for (let i = 0; i < n; i++) {
+								let p2 = a[i]
+
+								// raise a wall from this edge up to the roofs.
+								let wall = plane_graph()
+								for (let face of roof.comp.faces)
+									project_wall_to_roof_face(wall, p1, p2, face)
+
+								// deduplicate points.
+								//
+
+								p1 = p2
+							}
+						}
+					}
 
 				}
 

@@ -19,6 +19,10 @@
 
 (function() {
 
+let {
+	callable_constructor, inherit_properties,
+} = glue
+
 let LOG = 0
 
 model3_component = function(pe) {
@@ -335,7 +339,7 @@ model3_component = function(pe) {
 		push_undo(replace_line_endpoint, old_pi, new_pi)
 	}
 
-	let face3 = poly3.subclass(class face3 extends Array {
+	let face3 = callable_constructor(class face3 extends poly3.class {
 
 		static is_poly3 = true
 		static is_face3 = true
@@ -376,6 +380,7 @@ model3_component = function(pe) {
 		}
 
 	})
+	inherit_properties(face3.class)
 
 	let mat_faces_map = map() // {material -> [face1,...]}
 
@@ -730,7 +735,7 @@ model3_component = function(pe) {
 			if (i == i1 || i == i2) // don't hit target line's endpoints
 				continue
 			get_point(i, p2)
-			target_line.closest_point_to_point(p2, true, p1)
+			target_line.project_point(p2, true, p1)
 			let ds = p2p_distance2(p1, p2)
 			if (ds <= max_d ** 2) {
 				if (f && f(int_line) === false)
@@ -755,7 +760,7 @@ model3_component = function(pe) {
 		let min_int_p
 		each_line_f = each_line_f || each_line
 		each_line_f(function(line) {
-			line.closest_point_to_point(p, true, int_p)
+			line.project_point(p, true, int_p)
 			let ds = p2p_distance2(p, int_p)
 			if (ds <= max_d ** 2) {
 				if (!(f && f(int_p, line) === false)) {

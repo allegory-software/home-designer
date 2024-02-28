@@ -87,28 +87,28 @@ API
 		area midpoint normal plane barycoord uv contains_point is_front_facing
 
 	poly[2] [pi1, ..., hole1_pi1, hole1_pi2, ..., points: [p1,...], holes: [hole1_pi1, hole2_pi1, ...]]
+		set assign to clone
 		% point_count get_point
 		is_convex is_convex_quad triangle_count triangles triangle2
 		center bbox area invalidate
 		hit contains_point
 		uv_at
-		set_plane plane xyz_quat get_point3 triangle3 get_normal
-		subclass
+		set_plane plane xyz_quat xy_quat xy xyz get_point3 triangle3 get_normal
 
 	poly3
-		xy_quat compute_smooth_normals
+		compute_smooth_normals
 
 	line2 [p0, p1]
-		* intersect_line intersects_line offset
+		* intersect_line intersects_line offset intersect_poly
 		set(line | p1,p2) assign to clone equals near to|from[_line2]_array
 		delta distance2 distance at reverse len set_len
-		closest_point_to_point_t closest_point_to_point intersect_line intersects_line
+		project_point_t project_point intersect_line intersects_line
 		transform
 
 	line3 [p0, p1]
 		set(line | p1,p2) assign to clone equals near to|from[_line3]_array
 		delta distance2 distance at reverse len set_len
-		closest_point_to_point_t closest_point_to_point intersect_line intersect_plane intersects_plane
+		project_point_t project_point intersect_line intersect_plane intersects_plane
 		transform
 
 	box[3] [min_p, max_p]
@@ -129,8 +129,8 @@ API
 const G = window
 
 const {
-	inf,
-	mod,
+	inf, sin, cos,
+	callable_constructor, inherit_properties,
 } = glue
 
 let NEAR = 1e-5 // distance epsilon (tolerance)
@@ -140,13 +140,16 @@ function near(a, b) { return abs(a - b) < NEAR }
 
 let near_angle = near
 
+// global for returning multiple values from functions. you must unpack
+// the return value of such functions before calling other functions.
 let out = []
 
-function rotate_point(px, py, cx, cy, angle, out) {
+function rotate_point(px, py, cx, cy, angle) {
 	let s = sin(angle)
 	let c = cos(angle)
 	let x = px - cx
 	let y = py - cy
+	out.length = 2
 	out[0] = cx + (x * c - y * s)
 	out[1] = cy + (x * s + y * c)
 	return out
@@ -2255,9 +2258,9 @@ let plane_class = class plane {
 		let n = poly.point_count()
 		assert(n >= 3)
 		let pn = _v1.set(0, 0, 0)
-		let p1 = poly.get_point3(0, _v2)
-		for (let i = 1; i <= n; i++) {
-			let p2 = poly.get_point3(i % n, _v3)
+		let p1 = poly.get_point3(n-1, _v2)
+		for (let i = 0; i < n; i++) {
+			let p2 = poly.get_point3(i, _v3)
 			pn[0] += (p1[1] - p2[1]) * (p1[2] + p2[2])
 			pn[1] += (p1[2] - p2[2]) * (p1[0] + p2[0])
 			pn[2] += (p1[0] - p2[0]) * (p1[1] + p2[1])
@@ -2670,15 +2673,15 @@ function set_seg_offset(p1, p2, d) {
 }
 
 // TODO: implement fast path for axis-aligned segments.
-function offset_corner(p0, p1, p2, d, out) {
+function offset_corner(p0, p1, p2, d) {
 	set_seg_offset(p0, p1, d)
 	set_seg_offset(p1, p2, d)
 	p0.max_offset = max(p0.max_offset, abs(d))
 	p1.max_offset = max(p1.max_offset, abs(d))
 	p2.max_offset = max(p2.max_offset, abs(d))
-	let [x1, y1, x2, y2] = line2.offset( d, p0[0], p0[1], p1[0], p1[1], out)
-	let [x3, y3, x4, y4] = line2.offset(-d, p2[0], p2[1], p1[0], p1[1], out)
-	let t1 = line2.intersect_line(x1, y1, x2, y2, x3, y3, x4, y4)
+	let [x1, y1, x2, y2] = line2.offset( d, p0[0], p0[1], p1[0], p1[1])
+	let [x3, y3, x4, y4] = line2.offset(-d, p2[0], p2[1], p1[0], p1[1])
+	let [t1, t2] = line2.intersect_line(x1, y1, x2, y2, x3, y3, x4, y4)
 	if (abs(t1) == inf) { // 0-degree corner: make a line cap of 2 points, 1*d thick
 		let dx = x2 == x4 ? d * sign(x1 - x2) : 0
 		let dy = y2 == y4 ? d * sign(y1 - y2) : 0
@@ -2705,19 +2708,29 @@ function offset_corner(p0, p1, p2, d, out) {
 	return out
 }
 
+// TODO: use custom create_point()
+// TODO: use get_point() and point_count()
+// TODO: use i1, i2 so we can offset the holes too.
 function poly_offset(ps, d, ops) {
+
+	ops.length = 0
+
+	if (!ps.length)
+		return ops
+
 	// remove null segments as we can't offset those (they don't have a normal).
-	let ps1 = ps
-	ps = []
-	for (let i = 0, n = ps1.length; i < n; i++) {
-		let p0 = ps1[mod(i-1, n)]
+	let ps1 = ps; ps = []
+	let n = ps1.length
+	let p0 = ps1[n-1]
+	for (let i = 0; i < n; i++) {
 		let p1 = ps1[i]
 		if (!v2.near(p0, p1))
 			ps.push(p1)
+		p0 = p1
 	}
 
-	ops.length = 0
-	if (ps.length == 1) { // single null seg: make a square
+	n = ps.length
+	if (n == 1) { // single null seg: make a square
 		let ci = 0
 		for (let op of [[-d, -d], [d, -d], [d, d], [-d, d]]) {
 			op[0] += ps[0][0]
@@ -2729,13 +2742,11 @@ function poly_offset(ps, d, ops) {
 		}
 	} else {
 		let ci = 0
-		for (let i = 0, n = ps.length; i < n; i++) {
-			let p1 = ps[i]
-			let i0 = i-1
-			let i2 = i+1
-			let p0 = ps[mod(i0--, n)]
-			let p2 = ps[mod(i2++, n)]
-			let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d, out)
+		let p0 = ps[n-2]
+		let p1 = ps[n-1]
+		for (let i = 0; i < n; i++) {
+			let p2 = ps[i]
+			let [x1, y1, x2, y2] = offset_corner(p0, p1, p2, d)
 			let [x0, y0] = p1
 			let op1 = [x1, y1]
 			op1.p = p1
@@ -2749,6 +2760,8 @@ function poly_offset(ps, d, ops) {
 				op2.ci = ci++
 				ops.push(op2)
 			}
+			p0 = p1
+			p1 = p2
 		}
 	}
 	return ops
@@ -2757,7 +2770,7 @@ function poly_offset(ps, d, ops) {
 // poly2 ---------------------------------------------------------------------
 
 // closed polygon used for representing the base cycles of a planar graph.
-// it can have filaments (coincident lines) which show as duplicate points.
+// it must not be self-intersecting but it can have duplicate points i.e. coincident lines.
 // it can have holes in the `holes` property.
 // it works on 2D points but you can use `set_plane()` to set a plane
 // and then access points in 3D with `get_point3()`.
@@ -2774,23 +2787,49 @@ function zcross2(x0, y0, x1, y1, x2, y2) {
 
 let poly2_class = class poly2 extends Array {
 
+	static is_poly = true
 	static is_poly2 = true
+
+	assign(v) {
+		assert(v.is_poly2)
+		let points = this.points
+		assign(this, v)
+		if (points) {
+			if (v.points)
+				assign(points, v.points)
+			this.points = points
+		}
+	}
+
+	set(v) {
+		array_set(this, v)
+		if (this.points && v.points)
+			array_set(this.points, v.points)
+	}
 
 	to(v) {
 		return v.set(this)
+	}
+
+	clone() {
+		return new this.constructor().set(this)
 	}
 
 	point_count() { // stub: replace based on how the points are stored.
 		return this.length
 	}
 
-	get_point() { // stub: replace based on how the points are stored.
+	get_point(i, out) { // stub: replace based on how the points are stored.
 		return out.from_v2_array(this.points, this[i])
 	}
 
 	point_count_without_holes() {
 		return this.holes?.length ? this.holes[0] : this.point_count()
 	}
+
+	hole_count() { return this.holes?.length ?? 0 }
+	hole_i1(i) { return this.holes[i] }
+	hole_i2(i) { return this.holes[i+1] ?? this.length }
 
 	center() {
 		let out = this._center
@@ -2799,17 +2838,22 @@ let poly2_class = class poly2 extends Array {
 			this._center = out
 		}
 		if (!this._center_valid) {
-			let [x0, y0] = this.get_point(0, _v2_0)
 			let twicearea = 0
 			let x = 0
 			let y = 0
-			for (let i = 0, n = this.length, j = n-1; i < n; j = i++) {
-				let [x1, y1] = this.get_point(i, _v2_0)
-				let [x2, y2] = this.get_point(j, _v2_0)
+			let n = this.length
+			let [x0, y0] = this.get_point(0  , _v2_0)
+			let [x1, y1] = this.get_point(n-1, _v2_0)
+			for (let i = 0; i < n; i++) {
+				let [x2, y2] = this.get_point(i, _v2_0)
+
 				let f = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
 				twicearea += f
 				x += (x1 + x2 - 2 * x0) * f
 				y += (y1 + y2 - 2 * y0) * f
+
+				x1 = x2
+				y1 = y2
 			}
 			let f = twicearea * 3
 			out[0] = x / f + x0
@@ -2822,11 +2866,20 @@ let poly2_class = class poly2 extends Array {
 	area() {
 		if (this._area == null) {
 			let s = 0
-			for (let i = 1, n = this.length; i <= n; i++) {
-				let [x0, y0] = this.get_point(mod(i-1, n), _v2_0)
-				let [x1, y1] = this.get_point(mod(i+0, n), _v2_0)
-				let [x2, y2] = this.get_point(mod(i+1, n), _v2_0)
-				s += x1 * y2 - y0
+			let n = this.length
+			if (n >= 3) {
+				let [x0, y0] = this.get_point(n-2, _v2_0)
+				let [x1, y1] = this.get_point(n-1, _v2_0)
+				for (let i = 0; i < n; i++) {
+					let [x2, y2] = this.get_point(i, _v2_0)
+
+					s += x1 * y2 - y0
+
+					x0 = x1
+					y0 = y1
+					x1 = x2
+					y1 = y2
+				}
 			}
 			this._area = s / 2
 		}
@@ -2848,15 +2901,21 @@ let poly2_class = class poly2 extends Array {
 		return bb
 	}
 
-	// TODO: remove or ignore filaments
 	hit(x, y) {
+		let n = this.point_count()
+		if (n < 3)
+			return false
 		let inside = false
-		for (let i = 0, j = this.length - 1; i < this.length; j = i++) {
-			let [xi, yi] = this[i]
-			let [xj, yj] = this[j]
-			let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+		let [x1, y1] = this.get_point(n-1, _v2_0)
+		for (let i = 0; i < n; i++) {
+			let [x2, y2] = this.get_point(i, _v2_0)
+
+			let intersect = ((y1 > y) != (y2 > y)) && (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1)
 			if (intersect)
 				inside = !inside
+
+			x1 = x2
+			y1 = y2
 		}
 		return inside
 	}
@@ -2875,13 +2934,15 @@ let poly2_class = class poly2 extends Array {
 			return true
 		let sp = 0
 		let sn = 0
-		let [x0, y0] = this.get_point(i  , _v2_0)
-		let [x1, y1] = this.get_point(i+1, _v2_0)
-		for (let i = 2; i < n+2; i++) {
-			let [x2, y2] = this.get_point(i < n ? i : i-n, _v2_0)
+		let [x0, y0] = this.get_point(n-2, _v2_0)
+		let [x1, y1] = this.get_point(n-1, _v2_0)
+		for (let i = 0; i < n; i++) {
+			let [x2, y2] = this.get_point(i, _v2_0)
+
 			let zcross = zcross2(x0, y0, x1, y1, x2, y2)
-			sp += zcross >= 0
-			sn += zcross <= 0
+			sp += zcross >= 0 // using >= to include filaments
+			sn += zcross <= 0 // using <= to include filaments
+
 			x0 = x1
 			y0 = y1
 			x1 = x2
@@ -2993,6 +3054,31 @@ let poly2_class = class poly2 extends Array {
 		return q
 	}
 
+	// xy_quat projects 3D points on the xy plane.
+	xy_quat() {
+		let q = this._xy_quat
+		if (!this._xy_quat_valid) {
+			if (!q) {
+				q = quat()
+				this._xy_quat = q
+			}
+			let plane = this.plane()
+			q.set_from_unit_vectors(plane.normal, v3.z_axis)
+			this._xy_quat_valid = true
+		}
+		return q
+	}
+
+	xy(p, out) {
+		_v0.set(p).transform(this.xy_quat())
+		return out ? out.set(_v0) : _v2_0.set(_v0)
+	}
+
+	xyz(p, out) {
+		out ??= _v0
+		return out.set(p, 0).transform(this.xyz_quat())
+	}
+
 	get_point3(i, out) {
 		out[2] = 0
 		this.get_point(i, out)
@@ -3012,7 +3098,42 @@ let poly2_class = class poly2 extends Array {
 		return out.set(this.plane().normal)
 	}
 
+	/*
+	clipper() {
+		let cpr = this._clipper
+		if (!this._clipper_valid) {
+			if (!cpr) {
+				cpr = new ClipperLib.Clipper()
+				this._clipper = cpr
+			}
+
+			let p = []
+			cpr._path = p
+			for (let i = 0, n = this.point_count(); i < n; i++) {
+				let [x, y] = this.get_point(i, _v2_0)
+				p.push({X: x, Y: y})
+			}
+
+			this._clipper_valid = true
+		}
+		return cpr
+	}
+	*/
+	/*
+		function intersect
+			cpr.AddPaths(subj_paths, ClipperLib.PolyType.ptSubject, true)  // true means closed path
+			cpr.AddPaths(clip_paths, ClipperLib.PolyType.ptClip, true)
+
+			let sol_paths = new ClipperLib.Paths()
+			let ok = cpr.Execute(ClipperLib.ClipType.ctUnion, sol_paths,
+				ClipperLib.PolyFillType.pftNonZero,
+				ClipperLib.PolyFillType.pftNonZero
+			)
+	*/
+
 	invalidate() {
+		//this._clipper_valid = false
+		this._xy_quat_valid = false
 		this._xyz_quat_valid = false
 		this._triangles_valid = false
 		this._area = null
@@ -3023,41 +3144,26 @@ let poly2_class = class poly2 extends Array {
 
 }
 
-let poly2p = poly2_class.prototype
-
 function poly2(...args) { return new poly2_class(...args) }
 poly2.class = poly2_class
-
-// usage: poly2.subclass(class MyPoly extends Array { ... })
-poly2.subclass = function(cls) {
-	// copy parent methods to prototype (keeps method lookup chain short).
-	for (let k of Object.getOwnPropertyNames(this.class.prototype))
-		if (!(k in cls.prototype)) // not overridden
-			cls.prototype[k] = this.class.prototype[k]
-	// create a functional constructor.
-	let cons = function(...args) { return new cls(...args) }
-	cons.class = cls
-	cons.subclass = poly2.subclass
-	return cons
-}
 
 let poly = poly2
 
 // poly3 ---------------------------------------------------------------------
 
 // a poly3 stores points in 3D. its plane can't be manually set but it's
-// calculated from the points. points in 2D are calculated on access.
+// deduced from the points. points in 2D are calculated on access.
 
 let poly2_invalidate = assert(poly2.class.prototype.invalidate)
 
-let poly3 = poly2.subclass(class poly3 extends Array {
+let poly3_class = class poly3 extends poly2_class {
 
+	static is_poly2 = false
 	static is_poly3 = true
 
 	get_point(i, out) {
 		let q = this.xy_quat()
-		out.set(this.get_point3(i, _v0).transform(q))
-		return out
+		return out.set(this.get_point3(i, _v0).transform(q))
 	}
 
 	get_point3(i, out) { // stub: replace based on how the points are stored.
@@ -3077,21 +3183,6 @@ let poly3 = poly2.subclass(class poly3 extends Array {
 			this._plane_valid = true
 		}
 		return p
-	}
-
-	// xy_quat projects points on the xy plane for in-plane calculations.
-	xy_quat() {
-		let q = this._xy_quat
-		if (!this._xy_quat_valid) {
-			if (!q) {
-				q = quat()
-				this._xy_quat = q
-			}
-			let plane = this.plane()
-			q.set_from_unit_vectors(plane.normal, v3.z_axis)
-			this._xy_quat_valid = true
-		}
-		return q
 	}
 
 	// TODO: move to poly2 and use accessors
@@ -3156,18 +3247,22 @@ let poly3 = poly2.subclass(class poly3 extends Array {
 		return this
 	}
 
-})
+}
+inherit_properties(poly3_class)
+let poly3 = callable_constructor(poly3_class)
 
 // line2 ---------------------------------------------------------------------
 
-let line2_class = class line2 extends Array {
+let line2_class = class l extends Array {
+
+	static is_line2 = true
 
 	constructor(p0, p1) {
 		super(p0 ?? v2(), p1 ?? v2())
 	}
 
 	set(p0, p1) {
-		if (p0.is_line2) {
+		if (p0.is_line2 || p0.is_line3) {
 			let line = p0
 			p0 = line[0]
 			p1 = line[1]
@@ -3221,6 +3316,8 @@ let line2_class = class line2 extends Array {
 	}
 
 	at(t, out) {
+		let [x1, y1] = this[0]
+		let [x2, y2] = this[1]
 		return line2.at(t, x1, y1, x2, y2, out)
 	}
 
@@ -3264,18 +3361,17 @@ let line2_class = class line2 extends Array {
 		return this
 	}
 
-	closest_point_to_point_t(p, clamp_to_line) {
-		let p0 = v2.sub(p, this[0], _v2_0)
-		let p1 = v2.sub(this[1], this[0], _v2_1)
-		let t = p1.dot(p0) / p1.dot(p1)
-		if (clamp_to_line)
-			t = clamp(t, 0, 1)
-		return t
+	project_point_t(C, clamp_to_line) {
+		let [A, B] = this
+		return line2.project_point_t(C[0], C[1], A[0], A[1], B[0], B[1], clamp_to_line)
 	}
 
-	closest_point_to_point(p, clamp_to_line, out) {
-		out.t = this.closest_point_to_point_t(p, clamp_to_line)
-		return this.delta(out).muls(out.t).add(this[0])
+	project_point(p, clamp_to_line, out) {
+		let [A, B] = this
+		let [Dx, Dy] = line2.project_point(C[0], C[1], A[0], A[1], B[0], B[1], clamp_to_line, out)
+		out[0] = Dx
+		out[1] = Dy
+		return out
 	}
 
 	transform(m) {
@@ -3302,7 +3398,7 @@ let line2_class = class line2 extends Array {
 		let [p1, p2] = this
 		let [x1, y1] = p1
 		let [x2, y2] = p2
-		let [x3, y3, x4, y4] = line2.offset(d, x1, y1, x2, y2, out)
+		let [x3, y3, x4, y4] = line2.offset(d, x1, y1, x2, y2)
 		out[0][0] = x3
 		out[0][1] = y3
 		out[1][0] = x4
@@ -3310,11 +3406,73 @@ let line2_class = class line2 extends Array {
 		return out
 	}
 
+	// intersect the line with a polygon and return a flattened array of segments
+	// of form [s1_t1, s1_t2, ...] where the values are time values on the line.
+	// use line.at() to get the actual points. if `only` is given, only the
+	// segments which are found to be inside or outside the polygon are returned.
+	split_by_poly(poly, only, out) {
+		let [x3, y3] = this[0]
+		let [x4, y4] = this[1]
+
+		out.push(0)
+
+		let n = poly.point_count()
+		let [x1, y1] = poly.get_point(n-1, _v2_0)
+		for (let i = 0; i < n; i++) {
+			let [x2, y2] = poly.get_point(i, _v2_0)
+
+			let [t1, t2] = line2.intersect_line(x3, y3, x4, y4, x1, y1, x2, y2)
+
+			//let R = round
+			//pr(n, R(x3), R(y3), '-', R(x4), R(y4), 'X', R(x1), R(y1), '-', R(x2), R(y2), t1, t2)
+
+			if (t1 != t1) { // coincidental, see if they touch
+				let t1_1 = line2.project_point_t(x1, y1, x3, y3, x4, y4)
+				let t1_2 = line2.project_point_t(x2, y2, x3, y3, x4, y4)
+				let p1_outside = t1_1 < 0 || t1_1 > 1
+				let p2_outside = t1_2 < 0 || t1_2 > 1
+				if (p1_outside && p2_outside) {
+					// coincidental but don't touch: ignore
+				} else {
+					// coincidental: TODO
+				}
+			} else {
+
+				if (t2 > 0 && t2 < 1) { // cutting
+					if (t1 > 0 && t1 < 1) { // cutting
+						out.push(t1)
+						out.push(t1)
+					}
+				}
+
+			}
+
+			x1 = x2
+			y1 = y2
+		}
+
+		out.push(1)
+
+		out.sort()
+
+		if (only) {
+			let mid_t = (out[1] + out[0]) / 2
+			let [xm, ym] = line2.at(mid_t, x3, y3, x4, y4, _v2_0)
+			// pr(mid_t, xm, ym, x3, y3, x4, y4)
+			let starts_inside = poly.hit(xm, ym)
+			let keep_inside = only == 'inside'
+			let remove_bit = (starts_inside == keep_inside) << 1
+			remove_values(out, (v, i) => (i & 2) == remove_bit)
+			out.starts_inside = starts_inside
+		}
+
+		return out
+	}
+
 }
 
-line2_class.prototype.is_line2 = true
-
 let line2 = function(p1, p2) { return new line2_class(p1, p2) }
+line2.class = line2_class
 
 // evaluate a line at time t using linear interpolation.
 // the time between 0..1 covers the segment interval.
@@ -3324,14 +3482,48 @@ line2.at = function line2_at(t, x1, y1, x2, y2, out) {
 	return out
 }
 
+// A---D--------B
+//     |
+//     C
+line2.project_point_t = function line2_project_point_t(Cx, Cy, Ax, Ay, Bx, By, clamp_to_line) {
+	// AB = B - A
+	// AC = C - A
+	// AD_t = (AB . AC) / (AB . AB)
+	let ABx = Bx - Ax
+	let ABy = By - Ay
+	let ACx = Cx - Ax
+	let ACy = Cy - Ay
+	let t = (ABx * ACx + ABy * ACy) / (ABx * ABx + ABy * ABy)
+	if (clamp_to_line)
+		t = clamp(t, 0, 1)
+	return t
+}
+
+line2.project_point = function line2_project_point(Cx, Cy, Ax, Ay, Bx, By, clamp_to_line) {
+	// AD = AB * AD_t
+	// D = A + AD
+	let t = line2.project_point_t(Cx, Cy, Ax, Ay, Bx, By, clamp_to_line)
+	let ABx = Bx - Ax
+	let ABy = By - Ay
+	let Dx = Ax + ABx * t
+	let Dy = Ay + ABy * t
+	out.length = 2
+	out[0] = Dx
+	out[1] = Dy
+	return out
+}
+
 // intersect line segment (x1, y1, x2, y2) with line segment (x3, y3, x4, y4).
-// returns the time on the first line where intersection occurs.
+// returns the times on the first line and second line where the intersection occurs.
 // if the intersection occurs outside the segments themselves, then t is
 // outside the 0..1 range. if the lines are parallel then t is +/-inf.
 // if they are coincidental, t is NaN.
 line2.intersect_line = function line2_intersect_line(x1, y1, x2, y2, x3, y3, x4, y4) {
 	let d = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1)
-	return ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / d
+	out.length = 2
+	out[0] = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / d
+	out[1] = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / d
+	return out
 }
 
 line2.intersects_line = function line2_intersects_line(l1, l2) {
@@ -3342,12 +3534,13 @@ line2.intersects_line = function line2_intersects_line(l1, l2) {
 // parallel line segment at a distance on the right side of a segment.
 // use a negative distance for the left side, or reflect the returned points
 // against their respective initial points.
-line2.offset = function line2_offset(d, x1, y1, x2, y2, out) {
+line2.offset = function line2_offset(d, x1, y1, x2, y2) {
 	// normal vector of the same length as original segment.
 	let dx = -(y2-y1)
 	let dy =   x2-x1
 	let k = d / distance(x1, y1, x2, y2) // normal vector scale factor
 	// normal vector scaled and translated to (x1,y1) and (x2,y2)
+	out.length = 4
 	out[0] = x1 + dx * k
 	out[1] = y1 + dy * k
 	out[2] = x2 + dx * k
@@ -3357,7 +3550,7 @@ line2.offset = function line2_offset(d, x1, y1, x2, y2, out) {
 
 // line3 ---------------------------------------------------------------------
 
-let line3_class = class line3 extends Array {
+let line3_class = class l extends Array {
 
 	constructor(p0, p1) {
 		super(p0 ?? v3(), p1 ?? v3())
@@ -3454,7 +3647,7 @@ let line3_class = class line3 extends Array {
 		return this
 	}
 
-	closest_point_to_point_t(p, clamp_to_line) {
+	project_point_t(p, clamp_to_line) {
 		let p0 = v3.sub(p, this[0], _v0)
 		let p1 = v3.sub(this[1], this[0], _v1)
 		let t = p1.dot(p0) / p1.dot(p1)
@@ -3463,8 +3656,8 @@ let line3_class = class line3 extends Array {
 		return t
 	}
 
-	closest_point_to_point(p, clamp_to_line, out) {
-		out.t = this.closest_point_to_point_t(p, clamp_to_line)
+	project_point(p, clamp_to_line, out) {
+		out.t = this.project_point_t(p, clamp_to_line)
 		return this.delta(out).muls(out.t).add(this[0])
 	}
 
@@ -3602,10 +3795,10 @@ let bbox2_class = class bbox2 extends Array {
 		let [x1, y1, x2, y2] = this
 		let cx = (x2 + x1) / 2
 		let cy = (y2 + y1) / 2
-		let [p1x, p1y] = rotate_point(x1, y1, cx, cy, a, out)
-		let [p2x, p2y] = rotate_point(x1, y2, cx, cy, a, out)
-		let [p3x, p3y] = rotate_point(x2, y1, cx, cy, a, out)
-		let [p4x, p4y] = rotate_point(x2, y2, cx, cy, a, out)
+		let [p1x, p1y] = rotate_point(x1, y1, cx, cy, a)
+		let [p2x, p2y] = rotate_point(x1, y2, cx, cy, a)
+		let [p3x, p3y] = rotate_point(x2, y1, cx, cy, a)
+		let [p4x, p4y] = rotate_point(x2, y2, cx, cy, a)
 		this.reset()
 		this.add_point(p1x, p1y)
 		this.add_point(p2x, p2y)
