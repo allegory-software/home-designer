@@ -189,6 +189,7 @@ function modeleditor(e) {
 
 	e.draw_state.draw = function() {
 		renderer.render(draw)
+		// TODO: draw overlays
 	}
 
 	function update_renderer() {
@@ -2326,84 +2327,97 @@ function modeleditor(e) {
 
 	let project_wall_to_roof_face
 	{
-	let l3 = line3()
-	let l2 = line2()
-	let v2_0 = v2()
-	let v2_1 = v2()
+	let edge = line3()
 	function wall_edge(wp) {
 		let [x, y] = wp
-		l3[0].set(x, 0, y)
-		l3[1].set(x, 1, y)
-		return l3
+		edge[0].set(x, 0, y)
+		edge[1].set(x, 1, y)
+		return edge
 	}
-	project_wall_to_roof_face = function(wall, wp1, wp2, face) {
-		face.plane().intersect_line(wall_edge(wp1), l3[0])
-		face.plane().intersect_line(wall_edge(wp2), l3[1])
-		l3.transform(face.xy_quat())
-		l2.set(l3)
+	let cl = line3() // wall cut line i.e. wall base line projected on the roof face plane
+	let cl_on_wall = line2() // cut line in wall plane as 2D vector
+	let cl_on_roof = line2() // cut line in roof plane as 2D vector
+	let sl = line2() // resulting seg line
+	project_wall_to_roof_face = function(wall, wp1, wp2, roof_face) {
+		roof_face.plane().intersect_line(wall_edge(wp1), cl[0])
+		roof_face.plane().intersect_line(wall_edge(wp2), cl[1])
+		cl.transform(wall.plane, cl_on_wall)
+		cl.transform(roof_face.plane(), cl_on_roof)
+		// log(
+		// 	'in_space', ...cl.s(),
+		// 	'roof_plane', ...roof_face.plane().s(),
+		// 	'on_roof', ...cl_on_roof.s())
 		// pr([...wp1], [...wp2], p1.clone(), p2.clone())
-		let ts = l2.split_by_poly(face, 'inside', [])
+		let ts = cl_on_roof.split_by_poly(roof_face, 'inside', [])
 		// pr(p1.clone(), p2.clone(), l2.clone(), face, clone(ts))
+		// log(clone(ts))
+
 		for (let i = 0, n = ts.length; i < n; i += 2) {
 			let t1 = ts[i+0]
 			let t2 = ts[i+1]
-			let [p1, p2] = l3
-			p1.set(0, 0, 0)
-			p2.set(0, 0, 0)
-			l2.at(t1, p1)
-			l2.at(t2, p2)
-			l3.transform(face.xyz_quat())
-			p1 = p1.clone()
-			p2 = p2.clone()
-			// points.push(p1, p2)
-			// segs.push([p1, p2])
+			cl_on_wall.at(t1, sl[0])
+			cl_on_wall.at(t2, sl[1])
+			let sp1 = wall.add_point(sl[0][0], sl[0][1])
+			let sp2 = wall.add_point(sl[1][0], sl[1][1])
+			wall.add_seg(sp1, sp2)
+			if (t1 == 0) wall.sp1 = sp1
+			if (t2 == 1) wall.sp2 = sp2
 		}
 	}
 	}
 
 	function create_plan() {
+
+		// TODO:
+		// let c = e.create_component({name: 'test'})
+		// root.comp.add_child(c, mat4())
+		// let p = plane().set_from_coplanar_points(v3(0, 0, 0), v3(1, 1, 0), v3(1, 1, 1))
+		// let [x, y] = p.transform_xyz_xy(0, 1, 1)
+
+		/*
+		let p = plane_graph()
+		let p1 = p.add_point(-14, 0)
+		let p2 = p.add_point(200, 0)
+		p.add_seg(p1, p2)
+		let p3 = p.add_point(-14, 214)
+		let p4 = p.add_point(200, 214)
+		p.add_seg(p3, p4)
+		p.add_seg(p1, p3)
+		p.add_seg(p2, p4)
+		log_on = true
+		p.fix()
+		log_on = false
+		pr(p)
+		*/
+
 		for (let floor of house.floors) {
 
-			let m = {points: [], faces: [], lines: []}
-			let i = 0
-			for (let fcomp of floor.comps) {
-				for (let cycle of fcomp.cycles) {
-					for (let ep of cycle.edges) {
-						m.points.push(ep[0], 0, ep[1])
-						ep._i = i++
-					}
-				}
-			}
-			for (let fcomp of floor.comps) {
-				let f = {pis: [], holes: []}
-				m.faces.push(f)
-				for (let a = fcomp.outer_cycle.edges, i = a.length-1; i >= 0; i--)
-					f.pis.push(a[i]._i)
-				for (let cycle of fcomp.cycles) {
-					if (cycle.outer)
-						continue
-					let hole_pis = []
-					f.holes.push(hole_pis)
-					for (let ep of cycle.edges)
-						hole_pis.push(ep._i)
-				}
-			}
-			if (0) { // show naked segs
-				for (let p of floor.ps) {
-					let [x, y] = p
-					m.points.push(x, 0, y)
-					p._i = i++
-				}
-				for (let [p1, p2] of floor.segs) {
-					m.lines.push(p1._i, p2._i)
-				}
-			}
 			let c = e.create_component({name: 'floor_'+floor.i})
-			c.set(m)
 			root.comp.add_child(c, mat4())
+
+			for (let fcomp of floor.comps) {
+				let face_pis = []
+				let face_holes = []
+				for (let cycle of fcomp.cycles) {
+					let pi0
+					for (let ep of cycle.edges) {
+						let pi = c.add_point_xyz(ep[0], 0, ep[1])
+						face_pis.push(pi)
+						pi0 = pi0 ?? pi
+					}
+					if (!cycle.outer)
+						face_holes.push(pi0)
+				}
+				c.add_face(face_pis, null, null, face_holes)
+			}
 
 			if (floor.roofs)
 				for (let roof of floor.roofs) {
+
+					let c = e.create_component({name: 'roof_'+floor.i})
+					root.comp.add_child(c, mat4())
+
+					roof.comp = c
 
 					let m = {points: [], faces: []}
 
@@ -2457,12 +2471,11 @@ function modeleditor(e) {
 
 					}
 
-					let c = e.create_component({name: 'roof_'+floor.i})
-					c.set(m)
-					roof.comp = c
+					c.add(m)
 
-					root.comp.add_child(c, mat4())
-
+					let A = v3()
+					let B = v3()
+					let C = v3()
 					for (let fcomp of floor.comps) {
 						for (let cycle of fcomp.cycles) {
 							let a = cycle.edges
@@ -2472,12 +2485,59 @@ function modeleditor(e) {
 								let p2 = a[i]
 
 								// raise a wall from this edge up to the roofs.
+								let wall_id = 'wall_'+cycle.id+'_'+i
+								let c = e.create_component({name: wall_id})
+								root.comp.add_child(c, mat4())
+
 								let wall = plane_graph()
+								wall.id = wall_id
+								push_log_if(true, 'raising wall', wall.id, 'between', p1.p.id, p2.p.id)
+
+								// create wall's vertical plane.
+								let [x1, y1] = p1
+								let [x2, y2] = p2
+								A.set(x1, 0, y1)
+								B.set(x2, 0, y2)
+								C.set(x1, 1, y1)
+								wall.plane = plane().set_from_coplanar_points(A, B, C)
+
+								// add wall base line
+								let [ax, ay] = wall.plane.transform_xyz_xy(A[0], A[1], A[2])
+								let [bx, by] = wall.plane.transform_xyz_xy(B[0], B[1], B[2])
+								// pr(...A, '', ...B, '', ax, ay, '', bx, by)
+								// A.transform(wall.plane)
+								// B.transform(wall.plane)
+								let wall_p1 = wall.add_point(ax, ay)
+								let wall_p2 = wall.add_point(bx, by)
+								wall.add_seg(wall_p1, wall_p2)
+
+								// project wall base line on each roof face plane
+								// and intersect it with the roof face poly, keeping
+								// only the parts that are inside the poly.
 								for (let face of roof.comp.faces)
 									project_wall_to_roof_face(wall, p1, p2, face)
 
-								// deduplicate points.
-								//
+								// add wall's vertical edges
+								if (wall.sp1) wall.add_seg(wall_p1, wall.sp1)
+								if (wall.sp2) wall.add_seg(wall_p2, wall.sp2)
+
+								if (wall.id == 'wall_1_1') {
+									// pr(...wall.ps_s())
+									// pr(...wall.segs_s())
+									log_on = true
+									wall.fix()
+									// pr(...wall.ps_s())
+									// pr(...wall.segs_s())
+									log_on = false
+									G.w = wall
+								} else {
+									wall.fix()
+								}
+								pop_log()
+								// pr('wall', wall.id, x1, y1, '-', x2, y2, ':', wall.length, wall[0].cycles[0])
+								// pr('wall', wall.id, x1, y1, '-', x2, y2, ':', ...wall.segs_s())
+
+								c.add(wall)
 
 								p1 = p2
 							}

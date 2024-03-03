@@ -99,7 +99,7 @@ model3_component = function(pe) {
 		update_point(pi, p)
 
 		if (LOG)
-			log('add_point', pi, p.x+','+p.y+','+p.z)
+			log('+point', pi, p.x, p.y, p.z)
 
 		return pi
 	}
@@ -208,7 +208,7 @@ model3_component = function(pe) {
 		push_undo(unref_line, li, 1)
 
 		if (LOG)
-			log('add_line', li, p1i+','+p2i)
+			log('+line', li, ':', p1i, p2i)
 
 		return li
 	}
@@ -236,7 +236,7 @@ model3_component = function(pe) {
 			push_undo(add_line, p1i, p2i, li)
 
 			if (LOG)
-				log('remove_line', li)
+				log('-line', li)
 
 		} else {
 
@@ -341,8 +341,7 @@ model3_component = function(pe) {
 
 	let face3 = callable_constructor(class face3 extends poly3.class {
 
-		static is_poly3 = true
-		static is_face3 = true
+		is_face3 = true
 
 		get_point3(i, out) {
 			return get_point(this[i], out)
@@ -398,7 +397,6 @@ model3_component = function(pe) {
 			fi = faces.length
 			face = face3()
 			face.lis = []
-			face.points = points
 			face.i = fi
 			faces[fi] = face
 		} else {
@@ -409,17 +407,10 @@ model3_component = function(pe) {
 			for (let pi of pis)
 				ref_point(pi)
 		}
-		if (holes) { // [[hole1_pi1, hole1_pi2, ...], ...]
+		if (holes) { // [hole1_i1, hole2_i1, ...]
 			if (!face.holes)
-				face.holes = [] // [hole1_pi1, hole2_pi1, ...]
-			for (let hole_pis of holes) {
-				face.holes.push(face.length) // hole_pi1
-				// poly3 wants hole pis added at the end of the array and uses
-				// .holes[0] to know where the points end and the holes start.
-				face.extend(hole_pis)
-				for (let pi of hole_pis)
-					ref_point(pi)
-			}
+				face.holes = []
+			face.holes.extend(holes)
 		}
 		if (lis) {
 			face.lis.extend(lis)
@@ -432,7 +423,7 @@ model3_component = function(pe) {
 		face.mat_inst.push(face)
 		faces_changed = true
 		if (LOG)
-			log('add_face', face.i, face.join(','), face.lis.join(','), material.i)
+			log('+face', face.i, ':', ...face, 'lis:', ...face.lis, 'mat', material.i)
 		return face
 	}
 
@@ -449,7 +440,7 @@ model3_component = function(pe) {
 		face.mat_inst.remove_value(face)
 		face.mat_inst = null
 		if (LOG)
-			log('remove_face', face.i)
+			log('-face', face.i)
 	}
 
 	function set_material(face, material) {
@@ -502,8 +493,8 @@ model3_component = function(pe) {
 		update_face_lis_for_poly(face, 0, face.point_count_without_holes())
 		if (face.holes)
 			for (let i = 0, n = face.holes.length; i < n; i++) {
-				let i1 = face.holes[i]
-				let i2 = face.holes[i+1] ?? face.point_count()
+				let i1 = face.hole_i1(i)
+				let i2 = face.hole_i2(i)
 				update_face_lis_for_poly(face, i1, i2)
 			}
 		faces_changed = true
@@ -654,7 +645,7 @@ model3_component = function(pe) {
 		children.push(mat)
 		pe.child_added(e, mat)
 		if (LOG)
-			log('add_child', mat)
+			log('+child', mat)
 		return mat
 	}
 
@@ -679,6 +670,8 @@ model3_component = function(pe) {
 
 	e.point_count = point_count
 	e.get_point   = get_point
+	e.add_point   = add_point
+	e.add_point_xyz = add_point_xyz
 
 	e.line_count      = line_count
 	e.get_line        = get_line
@@ -701,22 +694,60 @@ model3_component = function(pe) {
 	e.remove_child    = remove_child
 	e.set_child_layer = set_child_layer
 
-	e.set = function(t) {
+	e.add = function(t) {
 
-		if (t.points) {
-			let p = v3()
-			for (let i = 0, n = t.points.length; i < n; i += 3)
-				add_point(p.from_array(t.points, i))
+		if (t.is_plane_graph) {
+
+			LOG = 1
+
+			for (let p of t.ps) {
+				let [x, y, z] = t.plane.transform_xy_xyz(p[0], p[1])
+				p.i = add_point_xyz(x, y, z)
+			}
+
+			for (let comp of t) {
+				for (let cycle of comp.cycles) {
+					if (!cycle.outer)
+						continue
+					let mat = cycle.material ?? t.material
+					// TODO: cycles don't have holes, they have islands which
+					// may or may not be holes (they need to be marked at such).
+					// the islands have an outer edge which is the hole contour
+					// and also have 1..n cycles which also need to be added.
+					pr(cycle.map(p => p.i))
+					let face = add_face(cycle.map(p => p.i), null, mat, cycle.holes)
+					pr('pis', ...face, ...face.map((pi, i) => face.get_point(i, v2())), 'tri', ...face.triangles())
+				}
+			}
+
+			LOG = 0
+
+		} else if (t.is_poly) {
+
+			let _v0 = v3()
+			for (let i = 0, n = t.point_count(); i < n; i++) {
+				let p = t.get_point3(i, _v0)
+				p.i = add_point(p)
+			}
+			return add_face(t.map(p => p.i), null, t.material, t.holes)
+
+		} else {
+
+			if (t.points) {
+				let p = v3()
+				for (let i = 0, n = t.points.length; i < n; i += 3)
+					add_point(p.from_array(t.points, i))
+			}
+
+			if (t.faces)
+				for (let ft of t.faces)
+					add_face(ft.pis, ft.lis, ft.material, ft.holes)
+
+			if (t.lines)
+				for (let i = 0, n = t.lines.length; i < n; i += 2)
+					add_line(t.lines[i], t.lines[i+1])
+
 		}
-
-		if (t.faces)
-			for (let ft of t.faces)
-				add_face(ft.pis, ft.lis, ft.material, ft.holes)
-
-		if (t.lines)
-			for (let i = 0, n = t.lines.length; i < n; i += 2)
-				add_line(t.lines[i], t.lines[i+1])
-
 	}
 
 	// hit testing & snapping -------------------------------------------------
@@ -984,7 +1015,7 @@ model3_component = function(pe) {
 	e.selected_line_count = () => sel_lines.size
 	e.selected_child_count = () => sel_child_count
 
-	// model editing ----------------------------------------------------------
+	// draw line --------------------------------------------------------------
 
 	let real_p2p_distance2 = (p1, p2) => p1.distance2(p2)
 
@@ -1199,9 +1230,9 @@ model3_component = function(pe) {
 
 			if (LOG) {
 				log('pull.start', pull.face.i,
-					'edges:'+[...new_pp_edge.keys()].join(','),
-					'faces:'+[...new_pp_face.keys()].join(','),
-					'insert:'+json(ins_edge).replaceAll('"', '')
+					'edges:', ...new_pp_edge.keys(),
+					'faces:', ...new_pp_face.keys(),
+					'insert:', json(ins_edge).replaceAll('"', '')
 				)
 			}
 

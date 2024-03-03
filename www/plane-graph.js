@@ -107,16 +107,6 @@ function rem_filament(p, ps) {
 	}
 }
 
-function is_cw(ps) {
-	let s = 0
-	for (let i = 0, n = ps.length; i < n; i++) {
-		let [x1, y1] = ps[mod(i-1, n)]
-		let [x2, y2] = ps[i]
-		s += (x2-x1)*(y2+y1)
-	}
-	return s < 0
-}
-
 function left_bottom_point(ps) {
 	return ps.reduce((p0, p1) => {
 		let x1 = p1[0]
@@ -218,7 +208,8 @@ function closed_walk(first, outer_cycle) {
 	return walk
 }
 
-function extract_cycles_for(comp, pg) {
+function extract_inner_cycles_for(comp, pg) {
+	push_log('extracting inner cycles for comp', comp.id)
 	let ps = [...comp.ps]
 	while (ps.length > 0) {
 		let p = left_bottom_point(ps)
@@ -240,9 +231,11 @@ function extract_cycles_for(comp, pg) {
 		if (!add)
 			pg._free_cycle(c)
 	}
+	pop_log()
 }
 
 function extract_outer_cycle_for(comp) {
+	push_log('extracting outer cycle for comp', comp.id)
 	let p = left_bottom_point(comp.ps)
 	let c = closed_walk(p, true)
 	c.reverse() // outer cycle must go clockwise
@@ -250,6 +243,7 @@ function extract_outer_cycle_for(comp) {
 	c.comp = comp
 	comp.cycles.push(c)
 	comp.outer_cycle = c
+	pop_log()
 	return c
 }
 
@@ -323,15 +317,16 @@ let pg_freelist = freelist(function() {
 
 let next_id = 1
 
-let plane_graph_class = class G extends Array {
+let plane_graph_class = class plane_graph extends Array {
 
-	static is_plane_graph = true
+	is_plane_graph = true
 
 	constructor() {
 		super()
 		this.ps = []
 		this.segs = []
 		this.comps = []
+		this.id = this.gen_id('plane_graph')
 	}
 
 	add(pg, opt) {
@@ -421,6 +416,8 @@ let plane_graph_class = class G extends Array {
 		remove_value(seg[1].adj, seg[0])
 		seg[0] = null
 		seg[1] = null
+		seg.id = null
+		seg.removed = null
 		seg_freelist.free(seg)
 		log('-seg:', seg.id)
 	}
@@ -636,6 +633,8 @@ let plane_graph_class = class G extends Array {
 
 	// TODO: generalize to angled segs.
 	_split_intersecting_segs_on(v) {
+		if (!this.orthogonal)
+			return
 		push_log('split all intersecting segs')
 		for (let seg1 of this.segs) {
 			if (is_v(seg1) == v) {
@@ -682,7 +681,7 @@ let plane_graph_class = class G extends Array {
 					let seg = p.segs[j]
 					for (let i = 0; i < 2; i++) // each seg end
 						if (seg[i] == p) {
-							this.set_seg_point(seg, i, p0, 'seg end point dedup')
+							this.set_seg_point(seg, i, p0)
 							j-- // because seg was just removed from p.segs
 						}
 				}
@@ -696,8 +695,12 @@ let plane_graph_class = class G extends Array {
 	// TODO: generalize to angled segs.
 	// NOTE: requires no intersecting segments.
 	_break_overlapping_segs() {
+		if (!this.orthogonal)
+			return
 		push_log('breaking overlapping colinear segs')
 		this.segs.sort(function(s1, s2) {
+
+
 			// level 1 grouping by direction
 			let v1 = is_v(s1)
 			let v2 = is_v(s2)
@@ -708,12 +711,34 @@ let plane_graph_class = class G extends Array {
 			let m2 = seg_axis(s2)
 			let dm = m1 - m2
 			if (dm) return dm
-			// level 3 grouping by starting point because most segments are
-			// non-overlapping and we want to skip those quickly.
 			let i = v1 ? 1 : 0
 			let c1 = min(s1[0][i], s1[1][i])
 			let c2 = min(s2[0][i], s2[1][i])
 			return c1 - c2
+
+
+			// TODO:
+
+			// level 1 grouping by angle
+			let [p1, p2] = s1
+			let [x1, y1] = p1
+			let [x2, y2] = p2
+			let [p3, p4] = s2
+			let [x3, y3] = p3
+			let [x4, y4] = p4
+			let a1 = pseudo_angle(x2 - x1, y2 - y1)
+			let a2 = pseudo_angle(x4 - x3, y4 - y3)
+			let da = a1 - a2
+			if (da) return da
+			// level 2 grouping by x-intercept (same angle and x-intercept means colinear)
+			let xi1 = line2.x_intercept(x1, y1, x2, y2)
+			let xi2 = line2.x_intercept(x3, y3, x4, y4)
+			let dxi = xi1 - xi2
+			if (dxi) return dxi
+			// level 3 grouping by starting point because most segments are
+			// non-overlapping and we want to skip those quickly.
+			let dx = x1 - x2; if (dx) return dx
+			let dy = y1 - y2; return dy
 		})
 		let i0, v0, m0
 		for (let i = 0, n = this.segs.length; i <= n; i++) {
@@ -783,10 +808,12 @@ let plane_graph_class = class G extends Array {
 	// NOTE: needs adj refs
 	_find_comps() {
 
-		for (let p of this.ps)
-			p.visited = false
+		push_log('finding components')
 
 		this._free_comps()
+
+		for (let p of this.ps)
+			p.visited = false
 
 		function dfs(p, ps, segs) {
 			p.visited = true
@@ -808,6 +835,7 @@ let plane_graph_class = class G extends Array {
 			}
 		}
 
+		pop_log()
 	}
 
 	// finding which components are inside islands ----------------------------
@@ -840,6 +868,8 @@ let plane_graph_class = class G extends Array {
 	}
 
 	_find_inside_comps() {
+
+		push_log('finding islands')
 
 		// point-based bbox: enough for computing inside flag.
 		for (let c of this.comps) {
@@ -891,6 +921,8 @@ let plane_graph_class = class G extends Array {
 			}
 		}
 
+		pop_log()
+
 	}
 
 	// finding the cycle base -------------------------------------------------
@@ -899,8 +931,8 @@ let plane_graph_class = class G extends Array {
 		c.id = this.gen_id('cycle')
 		c.area_pos = [...c.center()]
 		c.islands = []
-		log('+cycle', c.comp.id, '/', c.id,
-			is_cw(c) ? 'cw' : 'ccw',
+		log('+cycle', this.id, '/', c.comp.id, '/', c.id,
+			c.is_cw() ? 'cw' : 'ccw',
 			c.outer ? 'outer' : '',
 			c.inside ? 'inside' : '',
 			':', ...c.map(p=>p.id))
@@ -918,11 +950,10 @@ let plane_graph_class = class G extends Array {
 
 	_extract_cycles() {
 
-		push_log('extracting cycles')
-
 		for (let c of this.comps)
 			c.cycles.length = 0
 
+		// NOTE: it's part of the API that the outer cycle is first cycle!
 		for (let c of this.comps) {
 			let cy = extract_outer_cycle_for(c)
 			this._init_cycle(cy)
@@ -930,10 +961,9 @@ let plane_graph_class = class G extends Array {
 		this._rebuild_adj_refs()
 
 		for (let c of this.comps)
-			extract_cycles_for(c, this)
+			extract_inner_cycles_for(c, this)
 		this._rebuild_adj_refs()
 
-		pop_log()
 	}
 
 	// hit testing ------------------------------------------------------------
@@ -974,6 +1004,7 @@ let plane_graph_class = class G extends Array {
 	_after_fix() {} // stub
 
 	fix() {
+		push_log('fixing plane_graph', this.id)
 		this._split_intersecting_segs()
 		this._break_overlapping_segs()
 		this._remove_null_segs()
@@ -985,7 +1016,32 @@ let plane_graph_class = class G extends Array {
 		this._extract_cycles()
 		this._find_inside_comps()
 		this._after_fix()
+		pop_log()
 		return this
+	}
+
+	// debugging --------------------------------------------------------------
+
+	ps_s() {
+		let a = []
+		for (let p of this.ps) {
+			let [x, y] = p
+			if (a.length) a.push(',')
+			a.push(p.id, ':', x, y)
+		}
+		return a
+	}
+
+	segs_s() {
+		let a = []
+		for (let seg of this.segs) {
+			let [p1, p2] = seg
+			let [x1, y1] = p1
+			let [x2, y2] = p2
+			if (a.length) a.push(',')
+			a.push(seg.id, ':', x1, y1, '-', x2, y2)
+		}
+		return a
 	}
 
 }

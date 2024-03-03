@@ -23,25 +23,28 @@ API
 		hit(x, y) contains_point(p)
 
 	v2 [x, y]
+		.x .y
 		* add sub mul div
 		set(x,y|v2|v3|v4) assign to sets clone equals near from[_v2|_v3|_v4]_array to[_v2]_array
 		len[2] set_len normalize
 		add adds sub subs negate mul muls div divs min max dot
 		distance[2]_to
-		transform(mat3) rotate
+		transform(mat3|quat|plane) rotate
 		origin zero
 
 	v3 [x, y, z]
+		.x .y .z
 		* add sub mul div cross zero one
 		set(x,y,z|v2,z|v3|v4|mat4) assign to sets clone equals near
 		from[_v3|_v4]_array to[_v3]_array from_rgb from_rgba from_hsl
 		len[2] set_len normalize
 		add adds sub subs negate mul muls div divs min max dot cross
 		angle_to distance[2]_to
-		transform(mat3|mat4|quat) rotate project
+		transform(mat3|mat4|quat|plane) rotate project
 		origin zero one up right x|y|z_axis black white
 
 	v4 [x, y, z, w]
+		.x .y .z .w
 		* add sub mul div
 		set assign to sets clone equals from[_v4]_array to[_v4]_array from_rgb from_rgba from_hsl
 		len[2] set_len normalize
@@ -50,12 +53,14 @@ API
 		origin one black white
 
 	mat3, mat3f32 [e11, e21, e31, e12, e22, e32, e13, e23, e33]
+		.e11 .e21 .e31 .e12 .e22 .e32 .e13 .e23 .e33
 		* mul
 		set(mat3|mat4) assign to reset clone equals from[_mat3]_array to[_mat3]_array
 		transpose det invert
 		mul premul muls scale rotate translate
 
 	mat4, mat4f32 [e11, e21, e31, e41, e12, e22, e32, e42, e13, e23, e33, e43, e14, e24, e34, e44]
+		e11 .e21 .e31 .e41 .e12 .e22 .e32 .e42 .e13 .e23 .e33 .e43 .e14 .e24 .e34 .e44
 		* mul
 		set(mat3|mat4|v3|quat) assign to reset clone equals from[_mat4]_array to[_mat4]_array
 		transpose det invert normal
@@ -63,10 +68,12 @@ API
 		frustum perspective ortho look_to compose rotation
 
 	quat[3] [x, y, z, w]
+		.x .y .z .w
 		set assign to reset clone equals from[_quat]_array to[_quat]_array
 		set_from_axis_angle set_from_rotation_matrix set_from_unit_vectors
 		len[2] normalize rotate_towards conjugate invert
 		angle_to dot mul premul slerp
+		transform33 transform_xy_xyz transform23 transform_xyz_xy transform32
 
 	plane[3] {constant:, normal:}
 		set assign to clone equals
@@ -74,7 +81,8 @@ API
 		normalize negate
 		distance_to_point project_point
 		intersect_line intersects_line clip_line intersect_plane
-		origin translate transform
+		origin translate
+		transform_xy_xyz transform23 transform_xyz_xy transform32
 
 	triangle2 [a, b, c]
 		* hit
@@ -99,19 +107,20 @@ API
 		compute_smooth_normals
 
 	line2 [p0, p1]
-		* intersect_line intersects_line offset intersect_poly
+		* intersect_line intersects_line offset intersect_poly x_intercept
 		set(line | p1,p2) assign to clone equals near to|from[_line2]_array
 		delta distance2 distance at reverse len set_len
 		project_point_t project_point intersect_line intersects_line
-		transform
+		transform(mat3|quat|plane)
 
 	line3 [p0, p1]
 		set(line | p1,p2) assign to clone equals near to|from[_line3]_array
 		delta distance2 distance at reverse len set_len
 		project_point_t project_point intersect_line intersect_plane intersects_plane
-		transform
+		transform(mat3|mat4|quat|plane)
 
 	box[3] [min_p, max_p]
+		.min .max
 		set assign to clone equals reset to_array to[_box3]_array from[_box3]_array add
 		is_empty center delta contains_point contains_box intersects_box
 		transform translate
@@ -158,6 +167,11 @@ function rotate_point(px, py, cx, cy, angle) {
 // v2 ------------------------------------------------------------------------
 
 let v2_class = class v extends Array {
+
+	is_v2 = true
+
+	get x() { return this[0] }; set x(v) { this[0] = v }
+	get y() { return this[1] }; set y(v) { this[1] = v }
 
 	constructor(x, y) {
 		super(x ?? 0, y ?? 0)
@@ -224,6 +238,13 @@ let v2_class = class v extends Array {
 	from_v4_array(a, i) { return this.from_array(a, 4 * i) }
 
 	to_v2_array(a, i) { return this.to_array(a, 2 * i) }
+
+	s() {
+		return [
+			this[0],
+			this[1],
+		]
+	}
 
 	len2() {
 		return (
@@ -329,15 +350,25 @@ let v2_class = class v extends Array {
 		return sqrt(this.distance2(v))
 	}
 
-	transform(arg) {
+	transform(arg, out) {
+
+		out ??= this
+
+		if (arg.is_plane || arg.is_quat)
+			return arg.transform23(this, out)
+
 		let x = this[0]
 		let y = this[1]
+
 		if (arg.is_mat3) {
+
 			let m = arg
 			this[0] = m[0] * x + m[3] * y + m[6]
 			this[1] = m[1] * x + m[4] * y + m[7]
+
 		} else
 			assert(false)
+
 		return this
 	}
 
@@ -354,11 +385,6 @@ let v2_class = class v extends Array {
 	}
 
 }
-
-v2_class.prototype.is_v2 = true
-
-property(v2_class, 'x', function() { return this[0] }, function(v) { this[0] = v })
-property(v2_class, 'y', function() { return this[1] }, function(v) { this[1] = v })
 
 let v2 = function v2(x, y) { return new v2_class(x, y) }
 v2.class = v2_class
@@ -428,6 +454,12 @@ function set_hsl(self, h, s, L) {
 }
 
 let v3_class = class v extends Array {
+
+	is_v3 = true
+
+	get x() { return this[0] }; set x(v) { this[0] = v }
+	get y() { return this[1] }; set y(v) { this[1] = v }
+	get z() { return this[2] }; set z(v) { this[2] = v }
 
 	constructor(x, y, z) {
 		super(x ?? 0, y ?? 0, z ?? 0)
@@ -511,6 +543,14 @@ let v3_class = class v extends Array {
 	from_v4_array(a, i) { return this.from_array(a, 4 * i) }
 
 	to_v3_array(a, i) { return this.to_array(a, 3 * i) }
+
+	s() {
+		return [
+			this[0],
+			this[1],
+			this[2],
+		]
+	}
 
 	from_rgb(s) {
 		if (isstr(s))
@@ -664,29 +704,25 @@ let v3_class = class v extends Array {
 		return sqrt(this.distance2(v))
 	}
 
-	transform(arg) {
+	transform(arg, out) {
+
+		out ??= this
+
+		if (arg.is_plane)
+			return arg.transform32(this, out)
+		else if (arg.is_quat)
+			if (out.is_v3)
+				return arg.transform33(this, out)
+			else if (out.is_v2)
+				return arg.transform32(this, out)
+			else
+				assert(false)
 
 		let x = this[0]
 		let y = this[1]
 		let z = this[2]
 
-		if (arg.is_quat) {
-
-			let qx = arg[0]
-			let qy = arg[1]
-			let qz = arg[2]
-			let qw = arg[3] // calculate quat * vector
-
-			let ix = qw * x + qy * z - qz * y
-			let iy = qw * y + qz * x - qx * z
-			let iz = qw * z + qx * y - qy * x
-			let iw = -qx * x - qy * y - qz * z // calculate result * inverse quat
-
-			this[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy
-			this[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz
-			this[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx
-
-		} else if (arg.is_mat3) {
+		if (arg.is_mat3) {
 
 			let m = arg
 			this[0] = m[0] * x + m[3] * y + m[6] * z
@@ -716,12 +752,6 @@ let v3_class = class v extends Array {
 	}
 
 }
-
-v3_class.prototype.is_v3 = true
-
-property(v3_class, 'x', function() { return this[0] }, function(v) { this[0] = v })
-property(v3_class, 'y', function() { return this[1] }, function(v) { this[1] = v })
-property(v3_class, 'z', function() { return this[2] }, function(v) { this[2] = v })
 
 let v3 = function v3(x, y, z) { return new v3_class(x, y, z) }
 v3.class = v3_class
@@ -789,6 +819,13 @@ let _v4 = v3()
 // v4 ------------------------------------------------------------------------
 
 let v4_class = class v extends Array {
+
+	is_v4 = true
+
+	get x() { return this[0] }; set x(v) { this[0] = v }
+	get y() { return this[1] }; set y(v) { this[1] = v }
+	get z() { return this[2] }; set z(v) { this[2] = v }
+	get w() { return this[3] }; set w(v) { this[3] = v }
 
 	constructor(x, y, z, w) {
 		super(x ?? 0, y ?? 0, z ?? 0, w ?? 1)
@@ -1027,13 +1064,6 @@ let v4_class = class v extends Array {
 
 }
 
-v4_class.prototype.is_v4 = true
-
-property(v4_class, 'x', function() { return this[0] }, function(v) { this[0] = v })
-property(v4_class, 'y', function() { return this[1] }, function(v) { this[1] = v })
-property(v4_class, 'z', function() { return this[2] }, function(v) { this[2] = v })
-property(v4_class, 'w', function() { return this[3] }, function(v) { this[3] = v })
-
 let v4 = function v4(x, y, z, w) { return new v4_class(x, y, z, w) }
 v4.class = v4_class
 
@@ -1080,6 +1110,18 @@ v4.white = v4.one
 let mat3_type = function(super_class, super_args) {
 
 	let mat3_class = class m extends super_class {
+
+		is_mat3 = true
+
+		get e11() { return this[0] }; set e11(v) { this[0] = v }
+		get e21() { return this[1] }; set e21(v) { this[1] = v }
+		get e31() { return this[2] }; set e31(v) { this[2] = v }
+		get e12() { return this[3] }; set e12(v) { this[3] = v }
+		get e22() { return this[4] }; set e22(v) { this[4] = v }
+		get e32() { return this[5] }; set e32(v) { this[5] = v }
+		get e13() { return this[6] }; set e13(v) { this[6] = v }
+		get e23() { return this[7] }; set e23(v) { this[7] = v }
+		get e33() { return this[8] }; set e33(v) { this[8] = v }
 
 		constructor() {
 			super(...super_args)
@@ -1276,18 +1318,6 @@ let mat3_type = function(super_class, super_args) {
 
 	}
 
-	mat3_class.prototype.is_mat3 = true
-
-	property(mat3_class, 'e11', function() { return this[0] }, function(v) { this[0] = v })
-	property(mat3_class, 'e21', function() { return this[1] }, function(v) { this[1] = v })
-	property(mat3_class, 'e31', function() { return this[2] }, function(v) { this[2] = v })
-	property(mat3_class, 'e12', function() { return this[3] }, function(v) { this[3] = v })
-	property(mat3_class, 'e22', function() { return this[4] }, function(v) { this[4] = v })
-	property(mat3_class, 'e32', function() { return this[5] }, function(v) { this[5] = v })
-	property(mat3_class, 'e13', function() { return this[6] }, function(v) { this[6] = v })
-	property(mat3_class, 'e23', function() { return this[7] }, function(v) { this[7] = v })
-	property(mat3_class, 'e33', function() { return this[8] }, function(v) { this[8] = v })
-
 	let mat3 = function() { return new mat3_class() }
 	mat3.class = mat3_class
 
@@ -1342,6 +1372,25 @@ mat3f32.identity = mat3f32()
 let mat4_type = function(super_class, super_args) {
 
 	let mat4_class = class m extends super_class {
+
+		is_mat4 = true
+
+		get e11() { return this[ 0] }; set e11(v) { this[ 0] = v }
+		get e21() { return this[ 1] }; set e21(v) { this[ 1] = v }
+		get e31() { return this[ 2] }; set e31(v) { this[ 2] = v }
+		get e41() { return this[ 3] }; set e41(v) { this[ 3] = v }
+		get e12() { return this[ 4] }; set e12(v) { this[ 4] = v }
+		get e22() { return this[ 5] }; set e22(v) { this[ 5] = v }
+		get e32() { return this[ 6] }; set e32(v) { this[ 6] = v }
+		get e42() { return this[ 7] }; set e42(v) { this[ 7] = v }
+		get e13() { return this[ 8] }; set e13(v) { this[ 8] = v }
+		get e23() { return this[ 9] }; set e23(v) { this[ 9] = v }
+		get e33() { return this[10] }; set e33(v) { this[10] = v }
+		get e43() { return this[11] }; set e43(v) { this[11] = v }
+		get e14() { return this[12] }; set e14(v) { this[12] = v }
+		get e24() { return this[13] }; set e24(v) { this[13] = v }
+		get e34() { return this[14] }; set e34(v) { this[14] = v }
+		get e44() { return this[15] }; set e44(v) { this[15] = v }
 
 		constructor() {
 			super(...super_args)
@@ -1820,25 +1869,6 @@ let mat4_type = function(super_class, super_args) {
 
 	}
 
-	mat4_class.prototype.is_mat4 = true
-
-	property(mat4_class, 'e11', function() { return this[ 0] }, function(v) { this[ 0] = v })
-	property(mat4_class, 'e21', function() { return this[ 1] }, function(v) { this[ 1] = v })
-	property(mat4_class, 'e31', function() { return this[ 2] }, function(v) { this[ 2] = v })
-	property(mat4_class, 'e41', function() { return this[ 3] }, function(v) { this[ 3] = v })
-	property(mat4_class, 'e12', function() { return this[ 4] }, function(v) { this[ 4] = v })
-	property(mat4_class, 'e22', function() { return this[ 5] }, function(v) { this[ 5] = v })
-	property(mat4_class, 'e32', function() { return this[ 6] }, function(v) { this[ 6] = v })
-	property(mat4_class, 'e42', function() { return this[ 7] }, function(v) { this[ 7] = v })
-	property(mat4_class, 'e13', function() { return this[ 8] }, function(v) { this[ 8] = v })
-	property(mat4_class, 'e23', function() { return this[ 9] }, function(v) { this[ 9] = v })
-	property(mat4_class, 'e33', function() { return this[10] }, function(v) { this[10] = v })
-	property(mat4_class, 'e43', function() { return this[11] }, function(v) { this[11] = v })
-	property(mat4_class, 'e14', function() { return this[12] }, function(v) { this[12] = v })
-	property(mat4_class, 'e24', function() { return this[13] }, function(v) { this[13] = v })
-	property(mat4_class, 'e34', function() { return this[14] }, function(v) { this[14] = v })
-	property(mat4_class, 'e44', function() { return this[15] }, function(v) { this[15] = v })
-
 	let mat4 = function(elements) { return new mat4_class(elements) }
 	mat4.class = mat4_class
 
@@ -1912,6 +1942,13 @@ mat4f32.identity = mat4f32()
 // quaternion ----------------------------------------------------------------
 
 let quat_class = class q extends Array {
+
+	is_quat = true
+
+	get x() { return this[0] }; set x(v) { this[0] = v }
+	get y() { return this[1] }; set y(v) { this[1] = v }
+	get z() { return this[2] }; set z(v) { this[2] = v }
+	get w() { return this[3] }; set w(v) { this[3] = v }
 
 	constructor(x, y, z, w) {
 		super(x ?? 0, y ?? 0, z ?? 0, w ?? 1)
@@ -2032,18 +2069,18 @@ let quat_class = class q extends Array {
 
 	// assumes direction vectors are normalized.
 	set_from_unit_vectors(from, to) {
-		let EPS = 0.000001
-		let r = from.dot(to) + 1
-		if (r < EPS) {
+		let [x, y, z] = from
+		let r = from.dot(to) + 1 // 1 because from.lenth() * to.length() == 1
+		if (r < NEAR) {
 			r = 0
-			if (abs(from[0]) > abs(from[2])) {
-				this[0] = -from[1]
-				this[1] =  from[0]
+			if (abs(x) > abs(z)) {
+				this[0] = -y
+				this[1] =  x
 				this[2] =  0
 			} else {
 				this[0] =  0
-				this[1] = -from[2]
-				this[2] =  from[1]
+				this[1] = -z
+				this[2] =  y
 			}
 		} else {
 			v3.cross(from, to, this)
@@ -2067,7 +2104,7 @@ let quat_class = class q extends Array {
 		return this
 	}
 
-	// quaternion is assumed to have unit length.
+	// assumed to have unit length!
 	invert() {
 		return this.conjugate()
 	}
@@ -2167,14 +2204,30 @@ let quat_class = class q extends Array {
 
 		return this
 	}
+
+
+	transform(x, y, z, o) { // quat * v3 -> v3
+
+		o ??= out
+		let [qx, qy, qz, qw] = this
+
+		let ix =  qw * x + qy * z - qz * y
+		let iy =  qw * y + qz * x - qx * z
+		let iz =  qw * z + qx * y - qy * x
+		let iw = -qx * x - qy * y - qz * z // result * inverse quat
+
+		o[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy
+		o[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz
+		o[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx
+
+		return o
+	}
+
+	transform33(p, out) {
+		return this.transform(p[0], p[1], p[2], out)
+	}
+
 }
-
-quat_class.prototype.is_quat = true
-
-property(quat_class, 'x', function() { return this[0] }, function(v) { this[0] = v })
-property(quat_class, 'y', function() { return this[1] }, function(v) { this[1] = v })
-property(quat_class, 'z', function() { return this[2] }, function(v) { this[2] = v })
-property(quat_class, 'w', function() { return this[3] }, function(v) { this[3] = v })
 
 let quat = function(x, y, z, w) { return new quat_class(x, y, z, w) }
 quat.class = quat_class
@@ -2182,18 +2235,12 @@ let quat3 = quat
 
 // from http://www.euclideanspace.com/maths/algebra/realNormedAlgebra/quaternions/code/index.htm
 quat.mul = function quatmul(a, b, out) {
-	let qax = a[0]
-	let qay = a[1]
-	let qaz = a[2]
-	let qaw = a[3]
-	let qbx = b[0]
-	let qby = b[1]
-	let qbz = b[2]
-	let qbw = b[3]
-	out[0] = qax * qbw + qaw * qbx + qay * qbz - qaz * qby
-	out[1] = qay * qbw + qaw * qby + qaz * qbx - qax * qbz
-	out[2] = qaz * qbw + qaw * qbz + qax * qby - qay * qbx
-	out[3] = qaw * qbw - qax * qbx - qay * qby - qaz * qbz
+	let [ax, ay, az, aw] = a
+	let [bx, by, bz, bw] = b
+	out[0] = ax * bw + aw * bx + ay * bz - az * by
+	out[1] = ay * bw + aw * by + az * bx - ax * bz
+	out[2] = az * bw + aw * bz + ax * by - ay * bx
+	out[3] = aw * bw - ax * bx - ay * by - az * bz
 	return out
 }
 
@@ -2204,6 +2251,8 @@ let _q0 = quat() // for v3
 let _m3_1 = mat3()
 
 let plane_class = class plane {
+
+	is_plane = true
 
 	constructor(normal, constant) {
 		this.normal = normal ?? v3.up.clone()
@@ -2219,6 +2268,7 @@ let plane_class = class plane {
 			this.normal.set(normal)
 			this.constant = constant
 		}
+		this.invalidate()
 		return this
 	}
 
@@ -2227,6 +2277,7 @@ let plane_class = class plane {
 		let normal = this.normal
 		assign(this, v)
 		this.normal = normal.assign(v.normal)
+		this.invalidate()
 	}
 
 	to(v) {
@@ -2241,15 +2292,19 @@ let plane_class = class plane {
 		return v.normal.equals(this.normal) && v.constant === this.constant
 	}
 
+	s() { return [this.constant, ...this.normal.s()] }
+
 	set_from_normal_and_coplanar_point(normal, v) {
 		this.normal.set(normal)
 		this.constant = -v.dot(this.normal)
+		this.invalidate()
 		return this
 	}
 
 	set_from_coplanar_points(a, b, c) {
 		let normal = _v1.set(c).sub(b).cross(_v2.set(a).sub(b)).normalize()
 		this.set_from_normal_and_coplanar_point(normal, a)
+		this.invalidate()
 		return this
 	}
 
@@ -2275,12 +2330,14 @@ let plane_class = class plane {
 		let inv_len = 1.0 / this.normal.len()
 		this.normal.muls(inv_len)
 		this.constant *= inv_len
+		this.invalidate()
 		return this
 	}
 
 	negate() {
 		this.constant *= -1
 		this.normal.negate()
+		this.invalidate()
 		return this
 	}
 
@@ -2349,6 +2406,7 @@ let plane_class = class plane {
 
 	translate(offset) {
 		this.constant -= offset.dot(this.normal)
+		this.invalidate()
 		return this
 	}
 
@@ -2357,12 +2415,71 @@ let plane_class = class plane {
 		let ref_p = this.origin(_v0).transform(m)
 		let normal = this.normal.transform(nm).normalize()
 		this.constant = -ref_p.dot(normal)
+		this.invalidate()
 		return this
 	}
 
-}
+	// xyz_quat puts 2D points on the plane.
+	xyz_quat() {
+		let q = this._xyz_quat
+		if (!this._xyz_quat_valid) {
+			if (!q) {
+				q = quat()
+				this._xyz_quat = q
+			}
+			q.set_from_unit_vectors(v3.z_axis, this.normal)
+			this._xyz_quat_valid = true
+		}
+		return q
+	}
 
-plane_class.prototype.is_plane = true
+	// xy_quat projects 3D points on the xy plane.
+	xy_quat() {
+		let q = this._xy_quat
+		if (!this._xy_quat_valid) {
+			if (!q) {
+				q = quat()
+				this._xy_quat = q
+			}
+			q.set_from_unit_vectors(this.normal, v3.z_axis)
+			this._xy_quat_valid = true
+		}
+		return q
+	}
+
+	transform_xyz_xy(x, y, z, out) {
+		let r = this.xy_quat().transform(x, y, z)
+		if (out) {
+			out[0] = r[0]
+			out[1] = r[1]
+			return out
+		}
+		return r
+	}
+
+	transform_xy_xyz(x, y, out) {
+		assert(this.c != null)
+		return this.xyz_quat().transform(x, y, this.c, out)
+	}
+
+	transform32(p, out) {
+		let r = this.transform_xyz_xy(p[0], p[1], p[2])
+		out[0] = r[0]
+		out[1] = r[1]
+		return out
+	}
+
+	transform23(p, out) {
+		return this.transform_xy_xyz(p[0], p[1], out)
+	}
+
+	invalidate() {
+		this._xy_quat_valid = false
+		this._xyz_quat_valid = false
+		this.c = this.xy_quat().transform(...this.origin(v3()))[2]
+	}
+
+}
 
 let plane = function(normal, constant) { return new plane_class(normal, constant) }
 plane.class = plane_class
@@ -2371,6 +2488,8 @@ let plane3 = plane // so you can do `let plane = plane3()`.
 // triangle2 -----------------------------------------------------------------
 
 let triangle2_class = class triangle2 extends Array {
+
+	is_triangle2 = true
 
 	constructor(a, b, c) {
 		super(a ?? v2(), b ?? v2(), c ?? v2())
@@ -2467,8 +2586,6 @@ let triangle2_class = class triangle2 extends Array {
 
 }
 
-triangle2_class.prototype.is_triangle2 = true
-
 let triangle2 = function(a, b, c) { return new triangle2_class(a, b, c) }
 triangle2.class = triangle2_class
 
@@ -2486,6 +2603,8 @@ triangle2.hit = function triangle2_hit(x, y, p1, p2, p3) {
 // triangle3 -----------------------------------------------------------------
 
 let triangle3_class = class triangle3 extends Array {
+
+	is_triangle3 = true
 
 	constructor(a, b, c) {
 		super(a ?? v3(), b ?? v3(), c ?? v3())
@@ -2597,8 +2716,6 @@ let triangle3_class = class triangle3 extends Array {
 	}
 
 }
-
-triangle3_class.prototype.is_triangle3 = true
 
 let triangle3 = function(a, b, c) { return new triangle3_class(a, b, c) }
 triangle3.class = triangle3_class
@@ -2785,10 +2902,12 @@ function zcross2(x0, y0, x1, y1, x2, y2) {
 	return dx1 * dy2 - dy1 * dx2
 }
 
+let tri_out = []
+
 let poly2_class = class poly2 extends Array {
 
-	static is_poly = true
-	static is_poly2 = true
+	is_poly = true
+	is_poly2 = true
 
 	assign(v) {
 		assert(v.is_poly2)
@@ -2830,6 +2949,16 @@ let poly2_class = class poly2 extends Array {
 	hole_count() { return this.holes?.length ?? 0 }
 	hole_i1(i) { return this.holes[i] }
 	hole_i2(i) { return this.holes[i+1] ?? this.length }
+
+	s() {
+		let a = []
+		for (let i = 0, n = this.point_count(); i < n; i++) {
+			let [x, y] = this.get_point(i, _v2_0)
+			if (i) a.push(',')
+			a.push(x, y)
+		}
+		return a
+	}
 
 	center() {
 		let out = this._center
@@ -2994,14 +3123,14 @@ let poly2_class = class poly2 extends Array {
 				a[5] = 2
 			} else {
 				a.length = 0
-				out.length = n * 2
+				tri_out.length = n * 2
 				for (let i = 0; i < n; i++) {
 					let [x, y] = this.get_point(i, _v2_0)
-					out[2*i+0] = x
-					out[2*i+1] = y
+					tri_out[2*i+0] = x
+					tri_out[2*i+1] = y
 				}
-				earcut(out, this.holes, 2, a)
-				out.length = 0
+				earcut(tri_out, this.holes, 2, a)
+				tri_out.length = 0
 			}
 			this._triangles_valid = true
 		}
@@ -3031,58 +3160,26 @@ let poly2_class = class poly2 extends Array {
 
 	// with a plane, a poly2 can be used in 3D.
 
-	set_plane(plane) {
-		this._plane = plane
-		this._xyz_quat_valid = false
-	}
+	set_plane(plane) { this._plane = plane }
+	plane() { return this._plane }
 
-	plane() {
-		return this._plane
-	}
-
-	// xyz_quat puts 2D points on the plane.
-	xyz_quat() {
-		let q = this._xyz_quat
-		if (!this._xyz_quat_valid) {
-			if (!q) {
-				q = quat()
-				this._xyz_quat = q
-			}
-			q.set_from_unit_vectors(this.plane().normal, v3.z_axis).invert()
-			this._xyz_quat_valid = true
-		}
-		return q
-	}
-
-	// xy_quat projects 3D points on the xy plane.
-	xy_quat() {
-		let q = this._xy_quat
-		if (!this._xy_quat_valid) {
-			if (!q) {
-				q = quat()
-				this._xy_quat = q
-			}
-			let plane = this.plane()
-			q.set_from_unit_vectors(plane.normal, v3.z_axis)
-			this._xy_quat_valid = true
-		}
-		return q
-	}
+	xyz_quat() { return this.plane().xyz_quat() }
+	xy_quat() { return this.plane().xy_quat() }
 
 	xy(p, out) {
-		_v0.set(p).transform(this.xy_quat())
+		this.xy_quat().transform(_v0.set(p))
 		return out ? out.set(_v0) : _v2_0.set(_v0)
 	}
 
 	xyz(p, out) {
 		out ??= _v0
-		return out.set(p, 0).transform(this.xyz_quat())
+		return this.xyz_quat().transform(out.set(p, 0))
 	}
 
 	get_point3(i, out) {
 		out[2] = 0
 		this.get_point(i, out)
-		return out.transform(this.xyz_quat())
+		return this.xyz_quat().transform(out)
 	}
 
 	triangle3(ti, out) {
@@ -3133,13 +3230,26 @@ let poly2_class = class poly2 extends Array {
 
 	invalidate() {
 		//this._clipper_valid = false
-		this._xy_quat_valid = false
-		this._xyz_quat_valid = false
 		this._triangles_valid = false
 		this._area = null
 		this._center_valid = false
 		this._bbox_valid = false
 		return this
+	}
+
+	is_cw() {
+		let n = this.point_count_without_holes()
+		if (n < 3)
+			return
+		let [x1, y1] = this.get_point(n-1, _v2_0)
+		let s = 0
+		for (let i = 1; i < n; i++) {
+			let [x2, y2] = this.get_point(i, _v2_0)
+			s += (x2-x1) * (y2+y1)
+			x1 = x2
+			y1 = y2
+		}
+		return s < 0
 	}
 
 }
@@ -3158,12 +3268,11 @@ let poly2_invalidate = assert(poly2.class.prototype.invalidate)
 
 let poly3_class = class poly3 extends poly2_class {
 
-	static is_poly2 = false
-	static is_poly3 = true
+	is_poly2 = false
+	is_poly3 = true
 
 	get_point(i, out) {
-		let q = this.xy_quat()
-		return out.set(this.get_point3(i, _v0).transform(q))
+		return this.plane().transform32(this.get_point3(i, _v0), out)
 	}
 
 	get_point3(i, out) { // stub: replace based on how the points are stored.
@@ -3241,7 +3350,6 @@ let poly3_class = class poly3 extends poly2_class {
 	}
 
 	invalidate() {
-		this._xy_quat_valid = false
 		this._plane_valid = false
 		poly2_invalidate.call(this)
 		return this
@@ -3255,7 +3363,7 @@ let poly3 = callable_constructor(poly3_class)
 
 let line2_class = class l extends Array {
 
-	static is_line2 = true
+	is_line2 = true
 
 	constructor(p0, p1) {
 		super(p0 ?? v2(), p1 ?? v2())
@@ -3361,6 +3469,10 @@ let line2_class = class l extends Array {
 		return this
 	}
 
+	s() {
+		return [...this[0].s(), '-', ...this[1].s()]
+	}
+
 	project_point_t(C, clamp_to_line) {
 		let [A, B] = this
 		return line2.project_point_t(C[0], C[1], A[0], A[1], B[0], B[1], clamp_to_line)
@@ -3374,10 +3486,11 @@ let line2_class = class l extends Array {
 		return out
 	}
 
-	transform(m) {
-		this[0].transform(m)
-		this[1].transform(m)
-		return this
+	transform(m, out) {
+		out ??= this
+		this[0].transform(m, out[0])
+		this[1].transform(m, out[1])
+		return out
 	}
 
 	intersect_line(other) {
@@ -3423,8 +3536,7 @@ let line2_class = class l extends Array {
 
 			let [t1, t2] = line2.intersect_line(x3, y3, x4, y4, x1, y1, x2, y2)
 
-			//let R = round
-			//pr(n, R(x3), R(y3), '-', R(x4), R(y4), 'X', R(x1), R(y1), '-', R(x2), R(y2), t1, t2)
+			// pr(i, x3, y3, '-', x4, y4, 'X', x1, y1, '-', x2, y2, t1, t2)
 
 			if (t1 != t1) { // coincidental, see if they touch
 				let t1_1 = line2.project_point_t(x1, y1, x3, y3, x4, y4)
@@ -3460,6 +3572,7 @@ let line2_class = class l extends Array {
 			let [xm, ym] = line2.at(mid_t, x3, y3, x4, y4, _v2_0)
 			// pr(mid_t, xm, ym, x3, y3, x4, y4)
 			let starts_inside = poly.hit(xm, ym)
+			// pr(...poly.s(), clone(out), mid_t, '', x3, y3, x4, y4, '', xm, ym, starts_inside)
 			let keep_inside = only == 'inside'
 			let remove_bit = (starts_inside == keep_inside) << 1
 			remove_values(out, (v, i) => (i & 2) == remove_bit)
@@ -3548,9 +3661,15 @@ line2.offset = function line2_offset(d, x1, y1, x2, y2) {
 	return out
 }
 
+line2.x_intercept = function(x1, y1, x2, y2) {
+	return (x1 - (x2 - x1) * y1) / (y2 - y1)
+}
+
 // line3 ---------------------------------------------------------------------
 
 let line3_class = class l extends Array {
+
+	is_line3 = true
 
 	constructor(p0, p1) {
 		super(p0 ?? v3(), p1 ?? v3())
@@ -3647,6 +3766,10 @@ let line3_class = class l extends Array {
 		return this
 	}
 
+	s() {
+		return [...this[0].s(), '-', ...this[1].s()]
+	}
+
 	project_point_t(p, clamp_to_line) {
 		let p0 = v3.sub(p, this[0], _v0)
 		let p1 = v3.sub(this[1], this[0], _v1)
@@ -3661,10 +3784,11 @@ let line3_class = class l extends Array {
 		return this.delta(out).muls(out.t).add(this[0])
 	}
 
-	transform(m) {
-		this[0].transform(m)
-		this[1].transform(m)
-		return this
+	transform(m, out) {
+		out ??= this
+		this[0].transform(m, out[0])
+		this[1].transform(m, out[1])
+		return out
 	}
 
 	// returns the smallest line that connects two (coplanar or skewed) lines.
@@ -3729,13 +3853,13 @@ let line3_class = class l extends Array {
 
 }
 
-line3_class.prototype.is_line3 = true
-
 let line3 = function(p1, p2) { return new line3_class(p1, p2) }
 
 // bbox2 ---------------------------------------------------------------------
 
 let bbox2_class = class bbox2 extends Array {
+
+	is_bbox2 = true
 
 	constructor(x1, y1, x2, y2) {
 		super(
@@ -3823,8 +3947,6 @@ let bbox2_class = class bbox2 extends Array {
 
 }
 
-bbox2_class.prototype.is_bbox2 = true
-
 function bbox2(x1, y1, x2, y2) { return new bbox2_class(x1, y1, x2, y2) }
 
 // box3 ----------------------------------------------------------------------
@@ -3833,6 +3955,11 @@ v3.inf = v3(inf, inf, inf)
 v3.minus_inf = v3(-inf, -inf, -inf)
 
 let box3_class = class box3 extends Array {
+
+	is_box3 = true
+
+	get min() { return this[0] }; set min(v) { this[0] = v }
+	get max() { return this[1] }; set max(v) { this[1] = v }
 
 	constructor(min, max) {
 		super(
@@ -3924,7 +4051,7 @@ let box3_class = class box3 extends Array {
 			this[1].max(v[0]).max(v[1])
 		} else if (v.is_poly3) {
 			for (let i = 0, n = v.point_count(); i < n; i++) {
-				let p = v.get_point()
+				let p = v.get_point(i, _v2_0)
 				this[0].min(p)
 				this[1].max(p)
 			}
@@ -3991,11 +4118,6 @@ let box3_class = class box3 extends Array {
 	}
 
 }
-
-box3_class.prototype.is_box3 = true
-
-property(box3_class, 'min', function() { return this[0] }, function(v) { this[0] = v })
-property(box3_class, 'max', function() { return this[1] }, function(v) { this[1] = v })
 
 let box3 = function(x1, y1, x2, y2) { return new box3_class(x1, y1, x2, y2) }
 let box = box3
