@@ -14,7 +14,7 @@
 <script src=ui_grid.js></script>
 <script src=../www/earcut.js></script>
 <script src=../www/3d.js global></script>
-<script src=../www/2d.js></script>
+<script src=../www/plane-graph.js></script>
 <script src=../www/gl.js></script>
 <script src=../www/gl-renderer.js></script>
 <script src=../www/model3.js></script>
@@ -28,7 +28,8 @@ const G = window
 
 let out = []
 
-DEBUG('DEBUG_PLAN')
+G.DEBUG_PLAN = 0
+G.DEBUG_PLAN_LOAD = 1
 
 let floor_names = [
 	'GROUND FLOOR',
@@ -92,7 +93,19 @@ let face_axis_sign = i => ((i + 3) & 2) - 1  // 0,1,2,3 -> 1,-1,-1,1
 // view utils ----------------------------------------------------------------
 
 let format_length = d => format_kcount(d / 1e2, 2)+'m'
-let format_area = a => format_kcount(a / 1e4, 2)+'m²'
+let format_area = a => format_kcount(abs(a) / 1e4, 2)+'m²'
+
+function line_middle(p1, p2) {
+	let [x1, y1] = p1
+	let [x2, y2] = p2
+	return [
+		(x2 + x1) / 2,
+		(y2 + y1) / 2,
+	]
+}
+function seg_center(seg) {
+	return line_middle(seg[0], seg[1])
+}
 
 // house model ---------------------------------------------------------------
 
@@ -132,30 +145,22 @@ function house(house) {
 
 	function create_floor(t, floor_i) {
 
-		t.gen_id = gen_id
-		t.house = house
-		t.i = floor_i
-		t.h ??= house.floor_h
-		t.fixed_h = t.h
-		t.bb = bbox2()
+		let floor = plane_graph()
 
-		t.orthogonal = true
-		let floor = plane_graph(t)
+		floor.gen_id = gen_id
+		floor.orthogonal = true
 
-		let ps = floor.ps
-		let segs = floor.segs
-		let comps = floor.comps
-		let root_comps = floor.root_comps
-		let add_point = floor.add_point
-		let add_seg = floor.add_seg
-		let set_seg_point = floor.set_seg_point
-		let fix = floor.fix
-		let roofs = floor.roofs
-		let next_adj = floor.next_adj
+		floor.house = house
+		floor.roofs = t.roofs
+		floor.i = floor_i
+		floor.id = 'floor'+floor_i
+		floor.h ??= house.floor_h
+		floor.fixed_h = t.h
+		floor.bb = bbox2()
 
 		floor.snap_lines = []
 
-		floor.after_fix = function() {
+		floor._after_fix = function() {
 			create_edges()
 			fix_roofs()
 			floor.snap_lines[0] = snap_lines_for(1)
@@ -175,13 +180,13 @@ function house(house) {
 				}
 				let a1 = c.edges.area()
 				if (0 && a1 != a0)
-					log('cycle', c.i, 'area fixed:', a1, '+', a0-a1, '=', a0)
+					log('cycle', c.id, 'area fixed:', a1, '+', a0-a1, '=', a0)
 			}
 		}
 
 		function create_edges() {
 
-			for (let p of ps)
+			for (let p of floor.ps)
 				p.max_offset = 0
 
 			let t_int = house.int_wall_thickness
@@ -189,7 +194,7 @@ function house(house) {
 			let o_int = t_int / 2
 			let o_ext = t_ext - o_int
 
-			for (let comp of comps) {
+			for (let comp of floor.comps) {
 				for (let c of comp.cycles) {
 					let edges = poly2()
 					edges.get_point = poly_get_point
@@ -197,12 +202,12 @@ function house(house) {
 				}
 			}
 
-			for (let c of root_comps)
+			for (let c of floor)
 				fix_areas_for(c)
 
 			// compute the level plan bbox now that we have outer skins.
 			floor.bb.reset()
-			for (let co of comps)
+			for (let co of floor.comps)
 				floor.bb.add_bbox2(...co.outer_cycle.edges.bbox())
 
 			// recompute house plan bbox.
@@ -241,11 +246,11 @@ function house(house) {
 		}
 
 		function init_roofs() {
-			if (!roofs)
+			if (!floor.roofs)
 				return
 			push_log('init roofs')
 
-			for (let roof of roofs) {
+			for (let roof of floor.roofs) {
 				roof.box = bbox2(...roof.box)
 				fix_roof(roof)
 			}
@@ -258,9 +263,9 @@ function house(house) {
 		}
 
 		function fix_roofs() {
-			if (!roofs)
+			if (!floor.roofs)
 				return
-			for (let roof of roofs)
+			for (let roof of floor.roofs)
 				fix_roof(roof)
 		}
 
@@ -277,17 +282,17 @@ function house(house) {
 		// stable at that corner while dragging the segment.
 		function fix_cycle(c, i, fw, action, new_p, p0, p1, p2) {
 			if (action == 'replace') {
-				log('cycle point replaced:', c.i, '/', i, ':', c[i].i, '->', new_p.i)
+				log('cycle point replaced:', c.id, '/', i, ':', c[i].id, '->', new_p.id)
 				c[i] = new_p
 			} else if (action == 'insert') {
 				i = fw ? i : i+1 // insert point in the cycle array
-				log('cycle point inserted:', c.i, '/', i, '(before ', c[i] ? c[i].i : 'end','):', new_p.i)
+				log('cycle point inserted:', c.id, '/', i, '(before ', c[i] ? c[i].id : 'end','):', new_p.id)
 				insert(c, i, new_p)
 			}
 		}
 		function fix_cycles_containing(p0, p1, p2, action, new_p) {
-			push_log('fix all cycles containing (', p0.i, p1.i, p2.i, ':', action, 'with', new_p.i)
-			for (let comp of comps)
+			push_log('fix all cycles containing (', p0.id, p1.id, p2.id, ':', action, 'with', new_p.id)
+			for (let comp of floor.comps)
 				for (let c of comp.cycles) {
 					let i0 = 0
 					while (1) {
@@ -308,24 +313,24 @@ function house(house) {
 		// must be separated by addidng a _|_ seg in between so they're not dragged along.
 		// NOTE: do not deduplicate points after this!
 		function detach_seg_at(seg, i, p00) {
-			push_log('detach seg:', seg.i)
+			push_log('detach seg:', seg.id)
 			let p  = seg[i]
 			let p0 = seg[1-i]
-			let new_p = add_point(p[0], p[1])
+			let new_p = floor.add_point(p[0], p[1])
 
 			// each side of (p0,p) needs a different kind of fixing depending on
 			// whether there's a _|_ seg at the separation point on that side or not.
 			if (p.adj.length > 2) {
 				for (let cw = 0; cw <= 1; cw++) {
-					let p1 = next_adj(p0, p, cw, 1)
+					let p1 = floor.next_adj(p0, p, cw, 1)
 					fix_cycles_containing(p0, p, p1 ?? p00, p1 ? 'replace' : 'insert', new_p)
 				}
 			} else { // no _|_ segs on the sides.
 				fix_cycles_containing(p0, p, p00, 'insert', new_p)
 			}
 
-			set_seg_point(seg, i, new_p, 1)
-			let new_seg = add_seg(p, new_p)
+			floor.set_seg_point(seg, i, new_p, 1)
+			let new_seg = floor.add_seg(p, new_p)
 			pop_log()
 		}
 		function points_equal(p1, p2) { return p1[0] == p2[0] && p1[1] == p2[1] }
@@ -408,7 +413,7 @@ function house(house) {
 			let min_a1 = sign * 1/0
 			let s_m1 = seg_m1(seg)
 			let s_m2 = seg_m2(seg)
-			for (let seg1 of segs) {
+			for (let seg1 of floor.segs) {
 				let s1_m1 = seg_m1(seg1)
 				let s1_m2 = seg_m2(seg1)
 				let a1 = seg_axis(seg1)
@@ -439,7 +444,7 @@ function house(house) {
 			let a = p[v ? 1 : 0]
 			let m = p[v ? 0 : 1]
 			let min_a1 = sign * 1/0
-			for (let seg1 of segs) {
+			for (let seg1 of floor.segs) {
 				if (seg_is_v(seg1[0], seg1[1]) != v) {
 					let a1 = seg_axis(seg1)
 					if (sign * a1 > sign * a && sign * a1 < sign * min_a1) {
@@ -491,7 +496,7 @@ function house(house) {
 		// find the seg in the left, right, top, bottom side around p.
 		function seg_around_point(p, sdx, sdy) {
 			let p0 = [p[0] + sdx, p[1] + sdy]
-			let p1 = next_adj(p0, p, 1, 0)
+			let p1 = floor.next_adj(p0, p, 1, 0)
 			// find the seg of (p, p1)
 			for (let seg of p.segs)
 				if (seg[0] == p && seg[1] == p1 || seg[1] == p && seg[0] == p1)
@@ -500,7 +505,7 @@ function house(house) {
 
 		function start_move_seg(seg, draw_state) {
 
-			push_log('START MOVE SEG:', seg.i)
+			push_log('START MOVE SEG:', seg.id)
 
 			detach_colinear_segs(seg)
 
@@ -533,11 +538,11 @@ function house(house) {
 			let sp1 = seg[0]
 			let sp2 = seg[1]
 			let v = seg_is_v(seg[0], seg[1])
-			for (let co of comps) {
+			for (let co of floor.comps) {
 				for (let c of co.cycles) {
 					for (let i = 0, n = c.edges.length; i <= n; i++) {
-						let ep1 = c.edges[mod(i+0, n)]
-						let ep2 = c.edges[mod(i+1, n)]
+						let ep1 = c.edges[(i+0) % n]
+						let ep2 = c.edges[(i+1) % n]
 						if (!(ep1.p == sp1 && ep2.p == sp2 || ep1.p == sp2 && ep2.p == sp1)) // not seg's edge
 							continue
 						let ep0 = last_perp_edge_point(c, i+0, n, -1, !v)
@@ -605,10 +610,10 @@ function house(house) {
 			}
 
 			s.stop = function(draw_state, remove_seg) {
-				push_log('STOP MOVE SEG:', seg.i)
+				push_log('STOP MOVE SEG:', seg.id)
 				if (remove_seg)
 					rem_seg(seg)
-				fix()
+				floor.fix()
 				pop_log()
 				draw_state.snap_lines.length = 0
 				draw_state.measure_edges.length = 0
@@ -636,8 +641,8 @@ function house(house) {
 						// detach seg at branch point p so we can then resize it by its free end-point.
 						let x = p[0] + dx * abs(sdx)
 						let y = p[1] + dy * abs(sdy)
-						let new_p = add_point(x, y)
-						set_seg_point(seg, seg_pi(seg, p), new_p)
+						let new_p = floor.add_point(x, y)
+						floor.set_seg_point(seg, seg_pi(seg, p), new_p)
 						p = new_p
 					}
 				}
@@ -653,17 +658,17 @@ function house(house) {
 				}
 				let x2 = x1 + dx * abs(sdx)
 				let y2 = y1 + dy * abs(sdy)
-				let p1 = add_point(x1, y1)
-				let p2 = add_point(x2, y2)
-				seg = add_seg(p1, p2)
+				let p1 = floor.add_point(x1, y1)
+				let p2 = floor.add_point(x2, y2)
+				seg = floor.add_seg(p1, p2)
 				p = p2
 			}
 
-			log('resizing seg:', seg.i)
+			log('resizing seg:', seg.id)
 
 			let p0 = [...p]
 
-			fix()
+			floor.fix()
 
 			pop_log()
 
@@ -692,8 +697,8 @@ function house(house) {
 			}
 
 			s.stop = function(draw_state) {
-				push_log('STOP RESIZE SEG:', seg.i)
-				fix()
+				push_log('STOP RESIZE SEG:', seg.id)
+				floor.fix()
 				pop_log()
 				draw_state.snap_lines.length = 0
 				draw_state.measure_edges.length = 0
@@ -706,7 +711,7 @@ function house(house) {
 		// init ----------------------------------------------------------------
 
 		push_log('LOADING LEVEL', floor.i)
-		floor.init()
+		floor.load(t.points, t.lines)
 		init_roofs()
 		pop_log()
 
@@ -754,6 +759,8 @@ function house(house) {
 
 		function create_face_planes() {
 
+			return // TODO
+
 			face.bb = face_bb(fv) // TODO: reuse bb
 
 			walls.length = 0
@@ -766,8 +773,8 @@ function house(house) {
 						continue
 					let eps = comp.outer_cycle.edges
 					for (let i = 0, n = eps.length; i < n; i++) {
-						let ep1 = eps[mod(i  , n)]
-						let ep2 = eps[mod(i+1, n)]
+						let ep1 = eps[(i+0) % n]
+						let ep2 = eps[(i+1) % n]
 						if (seg_is_v(ep1, ep2) != fv) // _|_ edge: invisible
 							continue
 						if (edge_sign(ep1, ep2) != fs) // back-face edge: obscured: cull it
@@ -789,7 +796,7 @@ function house(house) {
 				}
 			}
 
-			// pr(face, walls.map(w => w[2].i+':'+w[0].p.i+'-'+w[1].p.i).join(' '))
+			// pr(face, walls.map(w => w[2].i+':'+w[0].p.i+'-'+w[1].p.id).join(' '))
 
 			// sort walls by depth.
 			walls.sort(function(w1, w2) {
@@ -813,17 +820,19 @@ function house(house) {
 				// 1st level grouping: j1,j2 is all walls of a single depth plane.
 				push_log('FACE PLANE', 'face=', face_i, 'plane=', planes.length, 'depth=', ep_axis(walls[j1][0]), 'i=', j1, '..', j2)
 
-				let segs = []
+				let plan = plane_graph()
+				plan.gen_id = gen_id
+				plan.depth = ep_axis(walls[j1][0])
 
 				function add_seg(x1, y1, x2, y2, ep1, ep2, ...log_args) {
-					let p1 = [x1, y1]
-					let p2 = [x2, y2]
-					let seg = [p1, p2]
-					segs.push(seg)
+					push_log(...log_args, ':', x1, y1, '-', x2, y2)
+					let p1 = plan.add_point(x1, y1)
+					let p2 = plan.add_point(x2, y2)
 					// set back refs to origin eps for quick updating
 					p1.ep1 = ep1
 					p2.ep2 = ep2
-					log(...log_args, ':', x1, y1, '-', x2, y2)
+					plan.add_seg(p1, p2)
+					pop_log()
 				}
 
 				let last_i1, last_i2, last_floor_i
@@ -888,9 +897,6 @@ function house(house) {
 					last_floor_i = floor.i
 				}
 
-				let plan = plane_graph({lines: [segs], gen_id: gen_id})
-				plan.depth = ep_axis(walls[j1][0])
-				plan.init()
 				plan.fix()
 				planes.push(plan)
 
@@ -924,7 +930,7 @@ function house(house) {
 
 	function init() {
 		let t0 = clock()
-		push_log('LOADING PLAN')
+		push_log_if(DEBUG_PLAN_LOAD, 'LOADING PLAN')
 
 		let floors = house.floors
 		house.floors = []
@@ -955,7 +961,7 @@ function house(house) {
 			face.fix()
 
 		let dt = round((clock() - t0) * 1000)
-		pr('TIME', ('*').repeat(dt), dt, 'ms')
+		log('TIME', ('*').repeat(dt), dt, 'ms')
 
 		pop_log()
 	}
@@ -1582,7 +1588,7 @@ ui.box_widget('floor_view', {
 					y = sg.y(y)
 					cx.fillStyle = ui.fg_color('label')
 					let s = format_area(c.edges.area())
-					if (DEBUG_PLAN) s = co.i + '/' + c.i + ' ' + s
+					if (DEBUG_PLAN) s = co.id + '/' + c.id + ' ' + s
 					cx.fillText(s, x, y+5)
 				}
 			}
@@ -1673,7 +1679,7 @@ ui.box_widget('floor_view', {
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
 			cx.fillStyle = '#f66'
-			cx.fillText(seg.i, x, y)
+			cx.fillText(seg.id, x, y)
 		}
 
 		// point numbers
@@ -1683,7 +1689,7 @@ ui.box_widget('floor_view', {
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
 			cx.fillStyle = 'white'
-			cx.fillText(p.i, x, y)
+			cx.fillText(p.id, x, y)
 		}
 
 		// edge point numbers
@@ -1848,7 +1854,7 @@ ui.box_widget('floor_view', {
 
 		// hit inner cycle
 		if (!hit_p && !hit_seg) {
-			hit_cycle = plan.hit_cycles(mx, my)
+			hit_cycle = plan.hit_cycle_edges(mx, my)
 			if (hit_cycle)
 				hs.set('cycle', hit_cycle)
 		}
@@ -1861,7 +1867,6 @@ ui.box_widget('floor_view', {
 })
 
 // roof plan view ------------------------------------------------------------
-
 
 let ROOF_PLAN_VIEW_ID         = ui.S-1
 let ROOF_PLAN_VIEW_DRAW_STATE = ui.S+0
@@ -2209,7 +2214,7 @@ ui.box_widget('roof_plan_view', {
 					y = sg.y(y)
 					cx.fillStyle = ui.fg_color('label')
 					let s = format_area(c.edges.area())
-					if (DEBUG_PLAN) s = co.i + '/' + c.i + ' ' + s
+					if (DEBUG_PLAN) s = co.id + '/' + c.id + ' ' + s
 					cx.fillText(s, x, y+5)
 				}
 			}
@@ -2300,7 +2305,7 @@ ui.box_widget('roof_plan_view', {
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
 			cx.fillStyle = '#f66'
-			cx.fillText(seg.i, x, y)
+			cx.fillText(seg.id, x, y)
 		}
 
 		// point numbers
@@ -2310,7 +2315,7 @@ ui.box_widget('roof_plan_view', {
 			let x = sg.x(x0) - 5
 			let y = sg.y(y0) + 5
 			cx.fillStyle = 'white'
-			cx.fillText(p.i, x, y)
+			cx.fillText(p.id, x, y)
 		}
 
 		// edge point numbers
@@ -2667,7 +2672,7 @@ ui.box_widget('face_view', {
 
 // test UI -------------------------------------------------------------------
 
-if (0)
+/*
 G.test_plan = house({
 
 	floor_h: 250,
@@ -2752,6 +2757,7 @@ G.test_plan = house({
 	],
 
 })
+*/
 
 G.test_plan = house({
 
@@ -2763,11 +2769,11 @@ G.test_plan = house({
 				[200,400, 'cr'],
 			],
 			lines: [
-				['draw',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
+				['draw','tl',0,0, 'tr',600, 'br',400, 'bl',-600, 'tl',-400],
 				['connect','cl','cr'],
 			],
 			roofs: [
-				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 300, box: [0,0,600,400]},
+				{type: 'gable', pitch: 45, eaves: 50, axis: 'h', h: 300, box: [-50,-50,650,450]},
 			],
 		},
 	],
@@ -2843,8 +2849,6 @@ ui.main = function() {
 	ui.end_v()
 
 }
-
-DEBUG_PLAN = 0
 
 }()) // module function
 
