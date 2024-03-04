@@ -1,7 +1,7 @@
 /*
 
 	3D model editor widget.
-	Written by Cosmin Apreutesei. Public domain.
+	Written by Cosmin Apreutesei. Public Domain.
 
 */
 
@@ -9,8 +9,7 @@
 "use strict"
 const G = window
 
-let TRACE = 0
-let LOG   = 1
+let TRACE_GL = 0 // trace gl calls
 
 // stack with freelist.
 function freelist_stack(create) {
@@ -34,10 +33,11 @@ function freelist_stack(create) {
 	return e
 }
 
+let glue_log = log
+
 function modeleditor(e) {
 
-	let id = e.id
-	let house = e.house
+	let house = assert(e.house)
 
 	e.prop = function(k, t) {
 		e[k] = t.default
@@ -45,10 +45,13 @@ function modeleditor(e) {
 
 	e.draw_state = {}
 
+	function log(...args) {
+		glue_log(e.name, ...args)
+	}
+
 	// colors ------------------------------------------------------------------
 
 	let white = 0xffffff
-	let black = ui.fg_color_rgb('text')
 	let selected_color = 0x0000ff
 	let ref_color = 0xff00ff
 	let x_axis_color = 0x990000
@@ -63,7 +66,7 @@ function modeleditor(e) {
 	canvas.style.zIndex = -1 // put it behind the 2D canvas which serves as overlay.
 
 	ui.screen.appendChild(canvas)
-	ui.on_free(id, function() {
+	ui.on_free(e.id, function() {
 		canvas.remove()
 	})
 
@@ -107,7 +110,6 @@ function modeleditor(e) {
 		if (skybox)
 			skybox.update_view(camera.pos)
 
-		update_helper_points()
 		update_sunlight_pos()
 		update_renderer()
 
@@ -165,14 +167,14 @@ function modeleditor(e) {
 	}
 
 	function draw(prog) {
-		if (TRACE)
+		if (TRACE_GL)
 			gl.start_trace()
 		let t0 = time()
 		if (skybox)
 		 	skybox.draw(prog)
 		//ground_rr.draw(prog)
 		draw_model(prog)
-		if (TRACE)
+		if (TRACE_GL)
 			pr(gl.stop_trace())
 		helper_lines_rr.draw(prog)
 	}
@@ -189,7 +191,7 @@ function modeleditor(e) {
 
 	e.draw_state.draw = function() {
 		renderer.render(draw)
-		// TODO: draw overlays
+		draw_helper_points()
 	}
 
 	function update_renderer() {
@@ -278,7 +280,7 @@ function modeleditor(e) {
 			uv: v2(1, 1),
 			opacity: 1,
 		}, opt)
-		mat.name = mat.name || 'material ' + (next_material_num++)
+		mat.name = mat.name ?? 'material ' + (next_material_num++)
 		mat.opacity = clamp(mat.opacity, 0, 1)
 		materials.push(mat)
 		return mat
@@ -315,8 +317,7 @@ function modeleditor(e) {
 
 		let i = (ev && ev.index) ?? layers.length - 1
 
-		if (LOG)
-			log('add_layer', opt, ev, layer, i)
+		log('add_layer', opt, ev, layer, i)
 
 		push_undo(remove_layer, layer, {index: i})
 
@@ -337,8 +338,7 @@ function modeleditor(e) {
 		let i = assert(layers.remove_value(layer))
 		instances_valid = false
 
-		if (LOG)
-			log('remove_layer', layer, ev, i)
+		log('remove_layer', layer, ev, i)
 
 		assert(!ev || ev.index == null || ev.index == i)
 
@@ -353,8 +353,7 @@ function modeleditor(e) {
 
 	function move_layers(i, n, insert_i, ev) {
 
-		if (LOG)
-			log('move_layers', i, n, insert_i, ev)
+		log('move_layers', i, n, insert_i, ev)
 
 		layers.move(i, n, insert_i, ev)
 
@@ -367,8 +366,7 @@ function modeleditor(e) {
 
 	function layer_set_visibile(layer, visible) {
 
-		if (LOG)
-			log('layer_set_visibile', layer, visible)
+		log('layer_set_visibile', layer, visible)
 
 		layer.visible = !!visible
 		instances_valid = false
@@ -380,30 +378,28 @@ function modeleditor(e) {
 	// components -------------------------------------------------------------
 
 	let comps = [] // [comp1,...]
+	let next_comp_num = 0
 
 	function create_component(opt) {
-		let comp = model3_component(assign(opt || {}, {
-				gl               : gl,
-				push_undo        : push_undo,
-				default_material : default_material,
-				default_layer    : default_layer,
-				child_added      : child_added,
-				child_removed    : child_removed,
-				layer_changed    : layer_changed,
-				helper_point     : helper_point,
-			   black            : black,
-			}))
+		opt ??= {}
+		let comp = model3_component(assign(opt, {
+			name             : opt.name ?? 'component '+ (next_comp_num++),
+			gl               : gl,
+			push_undo        : push_undo,
+			default_material : default_material,
+			default_layer    : default_layer,
+			child_added      : child_added,
+			child_removed    : child_removed,
+			layer_changed    : layer_changed,
+		}))
+
+		// comp id must be dynamic because of shader-based hit-testing
+		// which limits the id range to 0..32K-1.
 		let id = comps.length
 		comps[id] = comp
 		comp.id = id
-		return comp
-	}
 
-	function remove_component(comp) {
-		comps.remove(comp.id)
-		let id = 0
-		for (let comp of comps)
-			comp.id = id++
+		return comp
 	}
 
 	function update_comp(comp) {
@@ -499,16 +495,21 @@ function modeleditor(e) {
 		root.comp = e.root
 	}
 
+	// TODO: finish this
 	function gc_components() {
 		for (let [comp, insts] of instances) {
 			if (!insts.length) {
 				if (insts.dab)
 					insts.dab.free()
 				instances.delete(comp)
-				remove_component(comp)
+				comp.id = null
 				comp.free()
 			}
 		}
+		remove_values(comps, comp => comp.id == null)
+		let id = 0
+		for (let comp of comps)
+			comp.id = id++
 	}
 
 	// drawing
@@ -722,12 +723,13 @@ function modeleditor(e) {
 		return (p1 ? p1.angle : 1/0) < (p2 ? p2.angle : 1/0) ? p1 : p2
 	}
 
+	let mouse_hit_axes
 	{
 	let ps = [v3(), v3(), v3()]
 	let cmp_ps = function(p1, p2) {
 		return p1.ds == p2.ds ? 0 : (p1.ds < p2.ds ? -1 : 1)
 	}
-	function mouse_hit_axes(model, max_hit_distance) {
+	mouse_hit_axes = function(model, max_hit_distance) {
 		let i = 0
 		for (let plane of ref_planes)
 			plane.mouse_hit_main_axis(model, max_hit_distance, ps[i++])
@@ -1065,46 +1067,99 @@ function modeleditor(e) {
 	})
 	}
 
-	// html-rendered helper points --------------------------------------------
+	// 2D-rendered helper points ----------------------------------------------
+
+	let helper_points = []
+
+	function helper_point_update() {
+		ui.animate()
+	}
 
 	function helper_point(p, opt) {
-
-		p = p || v3()
+		p ??= v3()
 		assign(p, opt)
-
-		/*
-		let s = 'model-editor-dot'
-		let e = div({class: (p.text != null ? s+'-debug '+s+'-debug-'+p.type : s)})
-		if (p.text != null)
-			e.set(p.text)
-
-		{
-		let _v0 = v2()
-		p.update = function() {
-			let sp = camera.world_to_screen(p, _v0)
-			e.x = sp[0]
-			e.y = sp[1]
-			e.attr('snap', p.snap)
-			e.show(p.visible !== false)
-		}}
-
-		p.free = function() {
-			e.remove()
-		}
-
-		p.update()
-		pe.add(e)
-		e.point = p
-		e.update = p.update
-		*/
-
-		p.update = noop
-
+		helper_points.push(p)
+		p.update = helper_point_update
 		return p
 	}
 
-	function update_helper_points() {
-			// TODO:
+	let _v0 = v2()
+	function draw_helper_point(p) {
+		if (p.visible === false)
+			return
+		let [x, y] = camera.world_to_screen(p, _v0)
+		let cx = ui.cx
+
+		let bg =
+			p.type == 'point' ? 'white'   :
+			p.type == 'face'  ? '#ccccff' :
+			p.type == 'line'  ? '#ffffcc' :
+			null
+
+		bg ??= (
+			p.snap == 'point'                   ? 'black'   :
+			p.snap == 'line'                    ? '#ff00ff' :
+			p.snap == 'line_middle'             ? '#ffff00' :
+			p.snap == 'face'                    ? '#ff00ff' :
+			p.snap == 'line_plane_intersection' ? '#00ffff' :
+			p.snap == 'ref_point'               ? 'white'   :
+			null
+		)
+
+		let rot = p.snap == 'face' ? 45*rad : 0
+
+		let round = p.snap == 'point' || p.snap == 'ref_point'
+
+		if (rot) {
+			cx.translate(x, y)
+			cx.rotate(rot)
+			cx.translate(-x, -y)
+		}
+
+		cx.beginPath()
+		if (round)
+			cx.arc(x, y, 6, 0, 2*PI)
+		else
+			cx.rect(x-4, y-4, 8, 8)
+
+		cx.fillStyle = bg
+		cx.fill()
+
+		cx.lineWidth = 2
+		cx.strokeStyle = 'black'
+		cx.stroke()
+
+		if (p.text) {
+			cx.fillStyle = ui.bg_color('bg1')
+			cx.fillText(p.text, x+ui.rem(.5), y+ui.rem(.35))
+		}
+
+	}
+
+	function draw_helper_points() {
+
+		for (let p of helper_points)
+			draw_helper_point(p)
+
+		if (DEBUG_PLAN && cur_comp) {
+
+			for (let i = 0, n = cur_comp.point_count(); i < n; i++)
+				if (cur_comp.point_rc(i))
+					draw_helper_point(assign(cur_comp.get_point(i, v3()),
+						{text: i, type: 'point', i: i, visible: true}))
+
+			for (let i = 0, n = cur_comp.line_count(); i < n; i++)
+				if (cur_comp.line_rc(i))
+					draw_helper_point(assign(cur_comp.get_line(i).at(.5, v3()),
+						{text: i, type: 'line', i: i, visible: true}))
+
+			for (let face of cur_comp.faces)
+				if (face.length)
+					draw_helper_point(assign(face.center(v3()),
+						{text: face.i, type: 'face', i: face.i, visible: true}))
+
+		}
+
 	}
 
 	// helper lines -----------------------------------------------------------
@@ -1370,7 +1425,7 @@ function modeleditor(e) {
 	let cur_point = helper_point(v3(), {visible: false})
 	let ref_point = helper_point(v3(), {visible: false, snap: 'ref_point'})
 	let cur_line  = helper_line(line3(v3(), cur_point), {visible: false})
-	let ref_line  = helper_line(line3(), {color: black, type: 'dashed', visible: false})
+	let ref_line  = helper_line(line3(), {color: 0x000000, type: 'dashed', visible: false})
 
 	let last_point_model = mat4()
 	let ref_point_model = mat4()
@@ -1512,8 +1567,8 @@ function modeleditor(e) {
 		cur_point.visible = !!p.snap
 		e.tooltip = snap_tooltips[p.snap || p.line_snap] || p.tooltip
 		cur_point.snap = p2.snap
-		cur_line.color = line_snap_colors[p2.line_snap] ?? black
-		ref_line.color = line_snap_colors[ref_line.snap] ?? black
+		cur_line.color = line_snap_colors[p2.line_snap] ?? 0x000000
+		ref_line.color = line_snap_colors[ref_line.snap] ?? 0x000000
 
 		cur_point.update()
 		cur_line.update()
@@ -1640,7 +1695,6 @@ function modeleditor(e) {
 			start_undo()
 			pull = cur_comp.start_pull(hit_p)
 			update()
-			// cur_comp.create_debug_points()
 		}
 
 		function stop() {
@@ -1664,7 +1718,6 @@ function modeleditor(e) {
 			ref_line.visible = false
 			ref_line.update()
 			update()
-			//cur_comp.create_debug_points()
 		}
 
 		tools.pull.pointerdown = function(capture) {
@@ -2321,12 +2374,11 @@ function modeleditor(e) {
 
 		*/
 
-		root.comp.create_debug_points()
-
 	}
 
 	let project_wall_to_roof_face
 	{
+
 	let edge = line3()
 	function wall_edge(wp) {
 		let [x, y] = wp
@@ -2334,23 +2386,21 @@ function modeleditor(e) {
 		edge[1].set(x, 1, y)
 		return edge
 	}
+
 	let cl = line3() // wall cut line i.e. wall base line projected on the roof face plane
 	let cl_on_wall = line2() // cut line in wall plane as 2D vector
 	let cl_on_roof = line2() // cut line in roof plane as 2D vector
 	let sl = line2() // resulting seg line
+
 	project_wall_to_roof_face = function(wall, wp1, wp2, roof_face) {
+
 		roof_face.plane().intersect_line(wall_edge(wp1), cl[0])
 		roof_face.plane().intersect_line(wall_edge(wp2), cl[1])
+
 		cl.transform(wall.plane, cl_on_wall)
 		cl.transform(roof_face.plane(), cl_on_roof)
-		// log(
-		// 	'in_space', ...cl.s(),
-		// 	'roof_plane', ...roof_face.plane().s(),
-		// 	'on_roof', ...cl_on_roof.s())
-		// pr([...wp1], [...wp2], p1.clone(), p2.clone())
+
 		let ts = cl_on_roof.split_by_poly(roof_face, 'inside', [])
-		// pr(p1.clone(), p2.clone(), l2.clone(), face, clone(ts))
-		// log(clone(ts))
 
 		for (let i = 0, n = ts.length; i < n; i += 2) {
 			let t1 = ts[i+0]
@@ -2384,13 +2434,15 @@ function modeleditor(e) {
 		p.add_seg(p3, p4)
 		p.add_seg(p1, p3)
 		p.add_seg(p2, p4)
-		log_on = true
 		p.fix()
-		log_on = false
 		pr(p)
 		*/
 
 		for (let floor of house.floors) {
+
+			push_log('creating floor', floor.id)
+
+			push_log('creating floor plan')
 
 			let c = e.create_component({name: 'floor_'+floor.i})
 			root.comp.add_child(c, mat4())
@@ -2411,142 +2463,170 @@ function modeleditor(e) {
 				c.add_face(face_pis, null, null, face_holes)
 			}
 
-			if (floor.roofs)
-				for (let roof of floor.roofs) {
+			pop_log()
 
-					let c = e.create_component({name: 'roof_'+floor.i})
-					root.comp.add_child(c, mat4())
+			for (let roof of floor.roofs ?? empty_array) {
 
-					roof.comp = c
+				let roof_name = 'roof_'+floor.i
 
-					let m = {points: [], faces: []}
+				push_log('creating roof', roof_name)
 
-					if (roof.type == 'gable') {
-						let pitch = roof.pitch
-						let h = assert(roof.h)
-						let eaves = roof.eaves ?? 0
-						let axis = roof.axis ?? 'v'
-						let [bx1, by1, bx2, by2] = roof.box
-						let rx1, ry1, rx2, ry2
-						if (axis == 'v') {
-							ry1 = by1
-							ry2 = by2
-							rx1 = (bx2 + bx1) / 2
-							rx2 = rx1
-						} else {
-							rx1 = bx1
-							rx2 = bx2
-							ry1 = (by2 + by1) / 2
-							ry2 = ry1
-						}
-						m.points.push(rx1, h, ry1)
-						m.points.push(rx2, h, ry2)
+				let c = e.create_component({name: roof_name})
+				root.comp.add_child(c, mat4())
 
-						for (let i = 0; i <= 1; i++) {
-							let f = {pis: []}
-							m.faces.push(f)
-							let x1, y1, x2, y2
+				roof.comp = c
+
+				if (roof.type == 'gable') {
+
+					// calculate the ridge end-point coords om the xz-plane
+					let pitch = roof.pitch
+					let h = assert(roof.h)
+					let eaves = roof.eaves ?? 0
+					let axis = roof.axis ?? 'v'
+					let [bx1, bz1, bx2, bz2] = roof.box
+					let rx1, rz1, rx2, rz2, y1, y2
+					if (axis == 'v') {
+						rz1 = bz1
+						rz2 = bz2
+						rx1 = (bx2 + bx1) / 2
+						rx2 = rx1
+					} else {
+						rx1 = bx1
+						rx2 = bx2
+						rz1 = (bz2 + bz1) / 2
+						rz2 = rz1
+					}
+
+					// generate the 2 sides, 2 faces each, of the gable roof
+					for (let j = 0; j <= 1; j++) { // bottom then top face
+
+						let ry = h + j * 20
+
+						// generate the ridge end-points for this face
+						c.add_point_xyz(rx1, ry, rz1)
+						c.add_point_xyz(rx2, ry, rz2)
+
+						for (let i = 0; i <= 1; i++) { // left then right side
+							let pis = []
+							let x1, z1, x2, z2
 							if (axis == 'v') {
-								y1 = ry1
-								y2 = ry2
+								z1 = rz1
+								z2 = rz2
 								x1 = i ? bx2 : bx1
 								x2 = x1
 							} else {
 								x1 = rx1
 								x2 = rx2
-								y1 = i ? by2 : by1
-								y2 = y1
+								z1 = i ? bz2 : bz1
+								z2 = z1
 							}
-							let y = h - 100
+							let y = ry - 100
 							if (!i) {
-								m.points.push(x2, y, y2)
-								m.points.push(x1, y, y1)
-								f.pis.push(0, 1, 2, 3)
+								c.add_point_xyz(x2, y, z2)
+								c.add_point_xyz(x1, y, z1)
+								if (!j)
+									pis.push(3, 2, 1, 0)
+								else
+									pis.push(6, 7, 8, 9)
 							} else {
-								m.points.push(x1, y, y1)
-								m.points.push(x2, y, y2)
-								f.pis.push(1, 0, 4, 5)
+								c.add_point_xyz(x1, y, z1)
+								c.add_point_xyz(x2, y, z2)
+								if (!j)
+									pis.push(5, 4, 0, 1)
+								else
+									pis.push(7, 6, 10, 11)
 							}
+							let face = c.add_face(pis)
+							face.bottom = !j
 						}
 
 					}
 
-					c.add(m)
-
-					let A = v3()
-					let B = v3()
-					let C = v3()
-					for (let fcomp of floor.comps) {
-						for (let cycle of fcomp.cycles) {
-							let a = cycle.edges
-							let n = a.length
-							let p1 = a[n-1]
-							for (let i = 0; i < n; i++) {
-								let p2 = a[i]
-
-								// raise a wall from this edge up to the roofs.
-								let wall_id = 'wall_'+cycle.id+'_'+i
-								let c = e.create_component({name: wall_id})
-								root.comp.add_child(c, mat4())
-
-								let wall = plane_graph()
-								wall.id = wall_id
-								push_log_if(true, 'raising wall', wall.id, 'between', p1.p.id, p2.p.id)
-
-								// create wall's vertical plane.
-								let [x1, y1] = p1
-								let [x2, y2] = p2
-								A.set(x1, 0, y1)
-								B.set(x2, 0, y2)
-								C.set(x1, 1, y1)
-								wall.plane = plane().set_from_coplanar_points(A, B, C)
-
-								// add wall base line
-								let [ax, ay] = wall.plane.transform_xyz_xy(A[0], A[1], A[2])
-								let [bx, by] = wall.plane.transform_xyz_xy(B[0], B[1], B[2])
-								// pr(...A, '', ...B, '', ax, ay, '', bx, by)
-								// A.transform(wall.plane)
-								// B.transform(wall.plane)
-								let wall_p1 = wall.add_point(ax, ay)
-								let wall_p2 = wall.add_point(bx, by)
-								wall.add_seg(wall_p1, wall_p2)
-
-								// project wall base line on each roof face plane
-								// and intersect it with the roof face poly, keeping
-								// only the parts that are inside the poly.
-								for (let face of roof.comp.faces)
-									project_wall_to_roof_face(wall, p1, p2, face)
-
-								// add wall's vertical edges
-								if (wall.sp1) wall.add_seg(wall_p1, wall.sp1)
-								if (wall.sp2) wall.add_seg(wall_p2, wall.sp2)
-
-								if (wall.id == 'wall_1_1') {
-									// pr(...wall.ps_s())
-									// pr(...wall.segs_s())
-									log_on = true
-									wall.fix()
-									// pr(...wall.ps_s())
-									// pr(...wall.segs_s())
-									log_on = false
-									G.w = wall
-								} else {
-									wall.fix()
-								}
-								pop_log()
-								// pr('wall', wall.id, x1, y1, '-', x2, y2, ':', wall.length, wall[0].cycles[0])
-								// pr('wall', wall.id, x1, y1, '-', x2, y2, ':', ...wall.segs_s())
-
-								c.add(wall)
-
-								p1 = p2
-							}
-						}
-					}
+					// create fascias
+					c.add_face([1, 2, 8, 7, 11, 5])
+					c.add_face([0, 4, 10, 6, 9, 3])
+					c.add_face([3, 9, 8, 2])
+					c.add_face([4, 5, 11, 10])
 
 				}
 
-		}
+				pop_log()
+
+			} // for roof
+
+			if (floor.roofs) {
+
+				push_log('raising walls')
+				let A = v3()
+				let B = v3()
+				let C = v3()
+				for (let fcomp of floor.comps) {
+					for (let cycle of fcomp.cycles) {
+						let a = cycle.edges
+						let n = a.length
+						let p2 = a[n-1]
+						for (let i = 0; i < n; i++) {
+							let p1 = a[i]
+
+							// raise a wall from this edge up to the roofs.
+							let wall_id = gen_id('wall')
+							// let c = e.create_component({name: wall_id})
+							// root.comp.add_child(c, mat4())
+
+							let wall = plane_graph()
+							wall.id = wall_id
+							push_log_if(true, 'raising wall', wall.id, 'between', p1.p.id, p2.p.id)
+
+							// create wall's vertical plane.
+							// The order of p1,p2 is important in order to orient the
+							// faces of the edges of the outer cycle outwards,
+							// and the faces of the edges of the inner cycles inwards.
+							let [x1, y1] = p1
+							let [x2, y2] = p2
+							A.set(x1, 0, y1)
+							B.set(x2, 0, y2)
+							C.set(x1, 1, y1)
+							wall.plane = plane().set_from_coplanar_points(A, B, C)
+
+							// add wall base line
+							let [ax, ay] = wall.plane.transform_xyz_xy(A[0], A[1], A[2])
+							let [bx, by] = wall.plane.transform_xyz_xy(B[0], B[1], B[2])
+							// A.transform(wall.plane)
+							// B.transform(wall.plane)
+							let wall_p1 = wall.add_point(ax, ay)
+							let wall_p2 = wall.add_point(bx, by)
+							wall.add_seg(wall_p1, wall_p2)
+
+							// project wall base line on each roof face plane
+							// and intersect it with the roof face poly, keeping
+							// only the parts that are inside the poly.
+							for (let roof of floor.roofs)
+								for (let face of roof.comp.faces)
+									if (face.bottom)
+										project_wall_to_roof_face(wall, p1, p2, face)
+
+							// add wall's vertical edges
+							if (wall.sp1) wall.add_seg(wall_p1, wall.sp1)
+							if (wall.sp2) wall.add_seg(wall_p2, wall.sp2)
+
+							wall.fix()
+							pop_log()
+
+							c.add(wall)
+
+							p2 = p1
+						}
+					}
+				}
+
+				pop_log()
+
+			} // if roofs: raise walls
+
+			pop_log()
+
+		} // for floor
+
 	}
 
 	// init -------------------------------------------------------------------
@@ -2645,7 +2725,13 @@ ui.box_widget('modeleditor', {
 
 		let cx = ui.cx
 
+		cx.save()
+		cx.translate(x, y)
+		cx.beginPath()
+		cx.rect(0, 0, w, h)
+		cx.clip()
 		ds.draw()
+		cx.restore()
 
 	},
 

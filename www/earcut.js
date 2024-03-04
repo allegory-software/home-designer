@@ -557,8 +557,8 @@ function middleInside(a, b) {
 // link two polygon vertices with a bridge; if the vertices belong to the same ring, it splits polygon into two;
 // if one belongs to the outer ring and another to a hole, it merges it into a single ring
 function splitPolygon(a, b) {
-    var a2 = new Node(a.i, a.x, a.y),
-        b2 = new Node(b.i, b.x, b.y),
+    var a2 = node(a.i, a.x, a.y),
+        b2 = node(b.i, b.x, b.y),
         an = a.next,
         bp = b.prev;
 
@@ -579,7 +579,7 @@ function splitPolygon(a, b) {
 
 // create a node and optionally link it with previous one (in a circular doubly linked list)
 function insertNode(i, x, y, last) {
-    var p = new Node(i, x, y);
+    var p = node(i, x, y);
 
     if (!last) {
         p.prev = p;
@@ -600,15 +600,17 @@ function removeNode(p) {
 
     if (p.prevZ) p.prevZ.nextZ = p.nextZ;
     if (p.nextZ) p.nextZ.prevZ = p.prevZ;
+
+    node_freelist.free(p);
 }
 
-function Node(i, x, y) {
+function Node() {
     // vertex index in coordinates array
-    this.i = i;
+    this.i = 0;
 
     // vertex coordinates
-    this.x = x;
-    this.y = y;
+    this.x = 0;
+    this.y = 0;
 
     // previous and next vertex nodes in a polygon ring
     this.prev = null;
@@ -623,6 +625,15 @@ function Node(i, x, y) {
 
     // indicates whether this is a steiner point
     this.steiner = false;
+}
+
+var node_freelist = freelist(function() { return new Node(); })
+function node(i, x, y) {
+    let node = node_freelist.alloc()
+    node.i = i;
+    node.x = x;
+    node.y = y;
+    return node;
 }
 
 // return a percentage difference between the polygon area and its triangulation area;

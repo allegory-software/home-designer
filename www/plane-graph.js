@@ -9,8 +9,8 @@
 
 		ps -> [p1, ...]                   points
 		segs -> [[s1p1, s1p2], ...]       segments
-		comps -> [comp1,...]              all components in no order
-		[comp1,...]                       root components i.e. root islands
+		comps -> [comp1,...]              all graph components in no order
+		[comp1,...]                       root graph components i.e. root islands
 
 		comp: {}
 			.ps -> [p1, ...]
@@ -326,7 +326,7 @@ let plane_graph_class = class plane_graph extends Array {
 		this.ps = []
 		this.segs = []
 		this.comps = []
-		this.id = this.gen_id('plane_graph')
+		this.id = gen_id('PG')
 	}
 
 	add(pg, opt) {
@@ -343,8 +343,6 @@ let plane_graph_class = class plane_graph extends Array {
 		return this.add(pg)
 	}
 
-	gen_id() { return next_id++ } // stub
-
 	to(i, out) { return out.set(this.ps[i]) }
 	at(i) { return this.ps[i] }
 
@@ -358,7 +356,7 @@ let plane_graph_class = class plane_graph extends Array {
 		let p = point_freelist.alloc()
 		p[0] = x
 		p[1] = y
-		p.id = id ?? this.gen_id('point')
+		p.id = id ?? gen_id('p')
 		if (this.ps_ids)
 			this.ps_ids.set(p.id, p)
 		this.ps.push(p)
@@ -399,7 +397,7 @@ let plane_graph_class = class plane_graph extends Array {
 		let seg = seg_freelist.alloc()
 		seg[0] = p1
 		seg[1] = p2
-		seg.id = id ?? this.gen_id('seg')
+		seg.id = id ?? gen_id('s')
 		this.segs.push(seg)
 		seg[0].segs.push(seg)
 		seg[1].segs.push(seg)
@@ -781,7 +779,7 @@ let plane_graph_class = class plane_graph extends Array {
 
 	_add_comp() {
 		let comp = comp_freelist.alloc()
-		comp.id = this.gen_id('comp')
+		comp.id = gen_id('co')
 		this.comps.push(comp)
 		return comp
 	}
@@ -794,6 +792,7 @@ let plane_graph_class = class plane_graph extends Array {
 		for (let cycle of comp.cycles)
 			this._free_cycle(cycle)
 		comp.cycles.length = 0
+		comp.outer_cycle = null
 		comp.segs.length = 0
 		comp.islands.length = 0
 		comp_freelist.free()
@@ -808,7 +807,7 @@ let plane_graph_class = class plane_graph extends Array {
 	// NOTE: needs adj refs
 	_find_comps() {
 
-		push_log('finding components')
+		push_log('finding graph components')
 
 		this._free_comps()
 
@@ -928,7 +927,7 @@ let plane_graph_class = class plane_graph extends Array {
 	// finding the cycle base -------------------------------------------------
 
 	_init_cycle(c) {
-		c.id = this.gen_id('cycle')
+		c.id = gen_id('cy')
 		c.area_pos = [...c.center()]
 		c.islands = []
 		log('+cycle', this.id, '/', c.comp.id, '/', c.id,

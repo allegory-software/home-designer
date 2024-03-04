@@ -1,7 +1,7 @@
 /*
 
 	Polygon-based editable 3D model components.
-	Written by Cosmin Apreutesei. Public domain.
+	Written by Cosmin Apreutesei. Public Domain.
 
 	Components are made primarily of polygons enclosed and connected by
 	lines defined over a common point cloud. A component can contain instances
@@ -19,11 +19,7 @@
 
 (function() {
 
-let {
-	callable_constructor, inherit_properties,
-} = glue
-
-let LOG = 0
+let LOG = DEBUG_LOG
 
 model3_component = function(pe) {
 
@@ -31,11 +27,6 @@ model3_component = function(pe) {
 	let e = {name: pe.name}
 	let gl = assert(pe.gl)
 	let push_undo = pe.push_undo
-
-	function log(s, ...args) {
-		assert(LOG)
-		pr(e.id, s, ...args)
-	}
 
 	// model (as in MVC and as in 3D model) -----------------------------------
 
@@ -98,8 +89,7 @@ model3_component = function(pe) {
 
 		update_point(pi, p)
 
-		if (LOG)
-			log('+point', pi, p.x, p.y, p.z)
+		if (LOG) log('+point', pi, ':', p.x, p.y, p.z)
 
 		return pi
 	}
@@ -207,8 +197,7 @@ model3_component = function(pe) {
 
 		push_undo(unref_line, li, 1)
 
-		if (LOG)
-			log('+line', li, ':', p1i, p2i)
+		if (LOG) log('+line', li, ':', p1i, p2i)
 
 		return li
 	}
@@ -235,8 +224,7 @@ model3_component = function(pe) {
 
 			push_undo(add_line, p1i, p2i, li)
 
-			if (LOG)
-				log('-line', li)
+			if (LOG) log('-line', li)
 
 		} else {
 
@@ -252,8 +240,7 @@ model3_component = function(pe) {
 
 		}
 
-		// if (LOG)
-			// log('unref_line', li, rc)
+		// if (LOG) log('unref_line', li, rc)
 	}
 
 	function ref_line(li, expect_rc) {
@@ -272,8 +259,7 @@ model3_component = function(pe) {
 
 		push_undo(unref_line, li, rc0 + 1)
 
-		// if (LOG)
-			// log('ref_line', li, rc0 + 1)
+		// if (LOG) log('ref_line', li, rc0 + 1)
 	}
 
 	function merge_lines(li1, li2, expect_rc) {
@@ -281,8 +267,7 @@ model3_component = function(pe) {
 		let pi1 = lines[5*li2+0] // pi1
 		let pi2 = lines[5*li2+1] // pi2
 
-		if (LOG)
-			log('merge_lines', li1, li2)
+		if (LOG) log('merge_lines', li1, li2)
 
 		assert(expect_rc == null || line_rc(li2) == expect_rc)
 
@@ -302,8 +287,7 @@ model3_component = function(pe) {
 		let sm1 = lines[5*li1+3] // smoothness
 		let op1 = lines[5*li1+4] // opacity
 
-		if (LOG)
-			log('cut_line', li1, pi)
+		if (LOG) log('cut_line', li1, pi)
 
 		let li2 = add_line(pi, pi2)
 		lines[5*li1+1] = pi // pi2
@@ -333,8 +317,7 @@ model3_component = function(pe) {
 		ref_point(new_pi)
 		unref_point(old_pi)
 
-		if (LOG)
-			log('replace_line_endpoint', li, '@'+i, old_pi, '->', new_pi)
+		if (LOG) log('replace_line_endpoint', li, '@', i, old_pi, '->', new_pi)
 
 		push_undo(replace_line_endpoint, old_pi, new_pi)
 	}
@@ -422,8 +405,8 @@ model3_component = function(pe) {
 		face.mat_inst = material_instance(material)
 		face.mat_inst.push(face)
 		faces_changed = true
-		if (LOG)
-			log('+face', face.i, ':', ...face, 'lis:', ...face.lis, 'mat', material.i)
+		if (LOG) log('+face', face.i, 'pis', ...face, 'lis', ...face.lis,
+			'mat', material.name)
 		return face
 	}
 
@@ -439,8 +422,7 @@ model3_component = function(pe) {
 		face.lis.length = 0
 		face.mat_inst.remove_value(face)
 		face.mat_inst = null
-		if (LOG)
-			log('-face', face.i)
+		if (LOG) log('-face', face.i)
 	}
 
 	function set_material(face, material) {
@@ -455,8 +437,7 @@ model3_component = function(pe) {
 		face.mat_inst.push(face)
 		faces_changed = true
 
-		if (LOG)
-			log('set_material', face.i, material.i)
+		if (LOG) log('set_material', face.i, material.i)
 
 		push_undo(set_material, face, m0)
 	}
@@ -503,8 +484,7 @@ model3_component = function(pe) {
 	function insert_edge(face, ei, pi, line_before_point, li) {
 		let line_ei = ei - (line_before_point ? 1 : 0)
 		assert(line_ei >= 0) // can't use ei=0 and line_before_point=true with this function.
-		if (LOG)
-			log('insert_edge', face.i, '@'+ei, 'pi='+pi, '@'+line_ei, 'li='+li, 'before_pi='+face[ei])
+		if (LOG) log('insert_edge', face.i, '@', ei, 'pi', pi, '@', line_ei, 'li', li, 'before_pi', face[ei])
 		face.insert(ei, pi)
 		face.lis.insert(line_ei, li)
 		if (face.mesh)
@@ -518,8 +498,7 @@ model3_component = function(pe) {
 		assert(expect_li == null || expect_li == li0)
 		face.lis[ei] = li
 
-		if (LOG)
-			log('replace_edge', face.i, '@'+ei, li0, '->', li)
+		if (LOG) log('replace_edge', face.i, '@', ei, li0, '->', li)
 
 		push_undo(replace_edge, face, ei, li0, li)
 	}
@@ -528,8 +507,7 @@ model3_component = function(pe) {
 		let pi0 = face[ei]
 		face[ei] = pi
 
-		if (LOG)
-			log('replace_face_point', face.i, '@'+ei, pi0, '->', pi)
+		if (LOG) log('replace_face_point', face.i, '@', ei, pi0, '->', pi)
 
 		push_undo(replace_face_point, face, ei, pi0)
 	}
@@ -641,11 +619,10 @@ model3_component = function(pe) {
 	function add_child(comp, mat, layer) {
 		assert(mat.is_mat4)
 		mat.comp = comp
-		mat.layer = layer || pe.default_layer
+		mat.layer = layer ?? pe.default_layer
 		children.push(mat)
 		pe.child_added(e, mat)
-		if (LOG)
-			log('+child', mat)
+		if (LOG) log('+child', comp.name, 'layer', mat.layer.name)
 		return mat
 	}
 
@@ -669,11 +646,15 @@ model3_component = function(pe) {
 	// public API
 
 	e.point_count = point_count
+	e.point_rc    = i => prc[i]
 	e.get_point   = get_point
 	e.add_point   = add_point
 	e.add_point_xyz = add_point_xyz
 
 	e.line_count      = line_count
+	e.line_rc         = line_rc
+	e.line_smoothness = line_smoothness
+	e.line_opacity    = line_opacity
 	e.get_line        = get_line
 	e.each_line       = each_line
 	e.add_line        = add_line
@@ -698,7 +679,7 @@ model3_component = function(pe) {
 
 		if (t.is_plane_graph) {
 
-			LOG = 1
+			push_log('add plane graph to', e.name, 'pg', t.id)
 
 			for (let p of t.ps) {
 				let [x, y, z] = t.plane.transform_xy_xyz(p[0], p[1])
@@ -714,13 +695,11 @@ model3_component = function(pe) {
 					// may or may not be holes (they need to be marked at such).
 					// the islands have an outer edge which is the hole contour
 					// and also have 1..n cycles which also need to be added.
-					pr(cycle.map(p => p.i))
 					let face = add_face(cycle.map(p => p.i), null, mat, cycle.holes)
-					pr('pis', ...face, ...face.map((pi, i) => face.get_point(i, v2())), 'tri', ...face.triangles())
 				}
 			}
 
-			LOG = 0
+			pop_log()
 
 		} else if (t.is_poly) {
 
@@ -1228,14 +1207,12 @@ model3_component = function(pe) {
 
 			}
 
-			if (LOG) {
+			if (LOG)
 				log('pull.start', pull.face.i,
 					'edges:', ...new_pp_edge.keys(),
 					'faces:', ...new_pp_face.keys(),
 					'insert:', json(ins_edge).replaceAll('"', '')
 				)
-			}
-
 
 			// create pp side edges and adjust pulled face points & edge endpoints.
 			let old_points = {} // {ei: pi}
@@ -1341,8 +1318,7 @@ model3_component = function(pe) {
 
 		pull.stop = function() {
 			// TODO: make hole, etc.
-			if (LOG)
-				log('pull.stop')
+			if (LOG) log('pull.stop')
 		}
 
 		return pull
@@ -1356,12 +1332,12 @@ model3_component = function(pe) {
 	let inv_edge_lis_dab     = gl && gl.dyn_arr_u32_index_buffer() // black dashed lines
 	let sel_inv_edge_lis_dab = gl && gl.dyn_arr_u32_index_buffer() // blue dashed lines
 
-	let points_rr             = gl.points_renderer({base_color: pe.black})
+	let points_rr             = gl.points_renderer()
 	let faces_rr              = gl.faces_renderer()
-	let black_thin_lines_rr   = gl.solid_lines_renderer({base_color: pe.black})
+	let black_thin_lines_rr   = gl.solid_lines_renderer()
 	let black_dashed_lines_rr = gl.dashed_lines_renderer({dash: 5, gap: 3})
 	let blue_dashed_lines_rr  = gl.dashed_lines_renderer({dash: 5, gap: 3, base_color: 0x0000ff})
-	let black_fat_lines_rr    = gl.fat_lines_renderer({})
+	let black_fat_lines_rr    = gl.fat_lines_renderer()
 	let blue_fat_lines_rr     = gl.fat_lines_renderer({base_color: 0x0000ff})
 
 	function free() {
@@ -1519,7 +1495,6 @@ model3_component = function(pe) {
 			blue_dashed_lines_rr.index = dab.buffer
 		}
 
-
 		if (points_changed || faces_changed) {
 
 			for (let mesh of meshes)
@@ -1585,36 +1560,6 @@ model3_component = function(pe) {
 	e.face_renderer = faces_rr
 	e.free = free
 	e.update = update
-
-	// debugging --------------------------------------------------------------
-
-	{
-	let hp = []
-	e.create_debug_points = function() {
-
-		if (!DEBUG)
-			return
-
-		for (let p of hp)
-			p.free()
-		hp.length = 0
-
-		for (let i = 0, n = point_count(); i < n; i++)
-			if (prc[i])
-				hp.push(pe.helper_point(get_point(i, v3()),
-					{text: i, type: 'point', i: i, visible: true}))
-
-		for (let i = 0, n = line_count(); i < n; i++)
-			if (line_rc(i))
-				hp.push(pe.helper_point(get_line(i).at(.5, v3()),
-					{text: i, type: 'line', i: i, visible: true}))
-
-		for (let face of faces)
-			if (face.length)
-				hp.push(pe.helper_point(face.center(v3()),
-					{text: face.i, type: 'face', i: face.i, visible: true}))
-
-	}}
 
 	return e
 }

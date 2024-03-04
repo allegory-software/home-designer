@@ -1,7 +1,7 @@
 /*
 
 	WebGL 2 renderer for a 3D model editor.
-	Written by Cosmin Apreutesei. Public domain.
+	Written by Cosmin Apreutesei. Public Domain.
 
 	Based on tutorials from learnopengl.com.
 

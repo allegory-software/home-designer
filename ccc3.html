@@ -127,15 +127,6 @@ function house(house) {
 		if (!(k in house))
 			house[k] = defaults[k]
 
-	let next_id = {}
-	function gen_id(k) {
-		if (!next_id[k])
-			next_id[k] = 1
-		else
-			next_id[k]++
-		return next_id[k]
-	}
-
 	function house_bb() {
 		let bb = bbox2()
 		for (let floor of house.floors)
@@ -147,7 +138,6 @@ function house(house) {
 
 		let floor = plane_graph()
 
-		floor.gen_id = gen_id
 		floor.orthogonal = true
 
 		floor.house = house
@@ -821,7 +811,6 @@ function house(house) {
 				push_log('FACE PLANE', 'face=', face_i, 'plane=', planes.length, 'depth=', ep_axis(walls[j1][0]), 'i=', j1, '..', j2)
 
 				let plan = plane_graph()
-				plan.gen_id = gen_id
 				plan.depth = ep_axis(walls[j1][0])
 
 				function add_seg(x1, y1, x2, y2, ep1, ep2, ...log_args) {
