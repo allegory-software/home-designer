@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html theme=dark>
+<head>
+<base href="../www2/">
+<link rel="icon" href="../www/favicon256.svg">
+<link rel="preload" href="icons/fa-regular-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="icons/fa-solid-900.woff2"   as="font" type="font/woff2" crossorigin>
+</head>
+<body>
+<script src=glue.js global extend></script>
+<script src=ui.js></script>
+<script src=ui_validation.js></script>
+<script src=ui_nav.js></script>
+<script src=ui_grid.js></script>
+<script src=../www/earcut.js></script>
+<script src=../www/3d.js global></script>
+<script src=../www/plane-graph.js></script>
+<script src=../www/gl.js></script>
+<script src=../www/gl-renderer.js></script>
+<script src=../www/model3.js></script>
+<script src=../www/suncalc.js></script>
+<script src=../www/model3-editor.js></script>
+<script src=../www/house-plan.js></script>
+<script src=../www/house-plan-editor.js></script>
+<script src=../www/house-model-editor.js></script>
+<script src=../www/tests.js></script>
+<script>
+
+(function () {
+"use strict"
+const G = window
+
+// test UI -------------------------------------------------------------------
+
+let current_plan
+
+ui.main = function() {
+
+	ui.m(20)
+
+	ui.v()
+
+		ui.h(0, ui.sp05())
+
+			if (ui.button('debug_plan_button', 'DEBUG', 0))
+				DEBUG_PLAN = !DEBUG_PLAN
+
+			if (ui.button('btn_light', 'lights', 0))
+				ui.default_theme = ui.default_theme == 'light' ? 'dark' : 'light'
+
+		ui.end_h()
+
+		ui.h()
+
+			ui.m(0, 20)
+			let plan_name = ui.list('test_plans', test_plan_names, 0)
+			let plan = test_plans[plan_name]
+			if (plan != current_plan?.plan) {
+				if (current_plan)
+					current_plan.free()
+				current_plan = house_plan(plan)
+				current_plan.plan = plan
+			}
+
+			ui.v()
+
+				ui.h()
+
+					if (current_plan.floors.length) {
+
+						for (let floor of current_plan.floors) {
+							ui.m(10)
+							ui.stack()
+								ui.bb('', null, null, 1, 'light')
+								ui.floor_editor('floor_editor_'+floor.i, floor)
+							ui.end_stack()
+						}
+
+					} else {
+
+						ui.m(10)
+						ui.stack()
+							ui.bb('', null, null, 1, 'light')
+						ui.end_stack()
+
+					}
+
+				ui.end_h()
+
+				if (0) {
+				ui.h()
+
+					for (let floor of current_plan.floors) {
+						ui.m(10)
+						ui.stack()
+							ui.bb('', null, null, 1, 'light')
+							// ui.roof_view('rv'+floor.i, floor)
+						ui.end_stack()
+					}
+
+				ui.end_h()
+				}
+
+			ui.end_v()
+
+			ui.house_model_editor('test_house_model_editor', current_plan)
+
+			if (0) {
+			ui.v()
+
+				for (let face of test_plan.faces) {
+					ui.m(10)
+					ui.stack()
+						ui.bb('', null, null, 1, 'light')
+						ui.face_view('face_view_'+face.i, current_plan, face.i)
+					ui.end_stack()
+				}
+
+			ui.end_v()
+			}
+
+		ui.end_h()
+
+	ui.end_v()
+
+}
+
+}()) // module function
+
+</script>
+</body>
+</html>

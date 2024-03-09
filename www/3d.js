@@ -2487,7 +2487,7 @@ let plane3 = plane // so you can do `let plane = plane3()`.
 
 // triangle2 -----------------------------------------------------------------
 
-let triangle2_class = class triangle2 extends Array {
+let triangle2_class = class tri2 extends Array {
 
 	is_triangle2 = true
 
@@ -2602,7 +2602,7 @@ triangle2.hit = function triangle2_hit(x, y, p1, p2, p3) {
 
 // triangle3 -----------------------------------------------------------------
 
-let triangle3_class = class triangle3 extends Array {
+let triangle3_class = class tri3 extends Array {
 
 	is_triangle3 = true
 
@@ -3857,7 +3857,7 @@ let line3 = function(p1, p2) { return new line3_class(p1, p2) }
 
 // bbox2 ---------------------------------------------------------------------
 
-let bbox2_class = class bbox2 extends Array {
+let bbox2_class = class bb2 extends Array {
 
 	is_bbox2 = true
 
@@ -3954,7 +3954,7 @@ function bbox2(x1, y1, x2, y2) { return new bbox2_class(x1, y1, x2, y2) }
 v3.inf = v3(inf, inf, inf)
 v3.minus_inf = v3(-inf, -inf, -inf)
 
-let box3_class = class box3 extends Array {
+let box3_class = class bb3 extends Array {
 
 	is_box3 = true
 

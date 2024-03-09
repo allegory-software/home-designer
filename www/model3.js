@@ -21,12 +21,11 @@
 
 let LOG = DEBUG_LOG
 
-model3_component = function(pe) {
+model3_component = function(opt, editor) {
 
-	assert(pe)
-	let e = {name: pe.name}
-	let gl = assert(pe.gl)
-	let push_undo = pe.push_undo
+	assert(editor)
+	let e = {name: opt.name}
+	let push_undo = editor.push_undo
 
 	// model (as in MVC and as in 3D model) -----------------------------------
 
@@ -367,7 +366,7 @@ model3_component = function(pe) {
 	let mat_faces_map = map() // {material -> [face1,...]}
 
 	function material_instance(mat) {
-		mat = mat || pe.default_material
+		mat = mat || editor.default_material
 		let mat_insts = attr(mat_faces_map, mat, Array)
 		mat_insts.material = mat
 		return mat_insts
@@ -401,7 +400,7 @@ model3_component = function(pe) {
 				ref_line(li)
 		} else
 			update_face_lis(face)
-		material = material || pe.default_material
+		material = material || editor.default_material
 		face.mat_inst = material_instance(material)
 		face.mat_inst.push(face)
 		faces_changed = true
@@ -619,22 +618,22 @@ model3_component = function(pe) {
 	function add_child(comp, mat, layer) {
 		assert(mat.is_mat4)
 		mat.comp = comp
-		mat.layer = layer ?? pe.default_layer
+		mat.layer = layer ?? editor.default_layer
 		children.push(mat)
-		pe.child_added(e, mat)
+		editor.child_added(e, mat)
 		if (LOG) log('+child', comp.name, 'layer', mat.layer.name)
 		return mat
 	}
 
 	function remove_child(mat) {
 		assert(children.remove_value(mat) >= 0)
-		pe.child_removed(e, mat)
+		editor.child_removed(e, mat)
 	}
 
 	function set_child_layer(node, layer) {
 		assert(node.comp == this)
 		node.layer = layer
-		pe.layer_changed(e, node)
+		editor.layer_changed(e, node)
 		return node
 	}
 
@@ -1326,11 +1325,13 @@ model3_component = function(pe) {
 
 	// rendering --------------------------------------------------------------
 
-	let points_dab           = gl && gl.dyn_arr_v3_buffer() // coords for points and lines
-	let used_pis_dab         = gl && gl.dyn_arr_u32_index_buffer() // points index buffer
-	let vis_edge_lis_dab     = gl && gl.dyn_arr_u32_index_buffer() // black thin lines
-	let inv_edge_lis_dab     = gl && gl.dyn_arr_u32_index_buffer() // black dashed lines
-	let sel_inv_edge_lis_dab = gl && gl.dyn_arr_u32_index_buffer() // blue dashed lines
+	let gl = assert(editor.gl)
+
+	let points_dab           = gl.dyn_arr_v3_buffer() // coords for points and lines
+	let used_pis_dab         = gl.dyn_arr_u32_index_buffer() // points index buffer
+	let vis_edge_lis_dab     = gl.dyn_arr_u32_index_buffer() // black thin lines
+	let inv_edge_lis_dab     = gl.dyn_arr_u32_index_buffer() // black dashed lines
+	let sel_inv_edge_lis_dab = gl.dyn_arr_u32_index_buffer() // blue dashed lines
 
 	let points_rr             = gl.points_renderer()
 	let faces_rr              = gl.faces_renderer()
@@ -1340,7 +1341,8 @@ model3_component = function(pe) {
 	let black_fat_lines_rr    = gl.fat_lines_renderer()
 	let blue_fat_lines_rr     = gl.fat_lines_renderer({base_color: 0x0000ff})
 
-	function free() {
+	e.free = function() {
+
 		points_dab            .free()
 		used_pis_dab          .free()
 		vis_edge_lis_dab      .free()
@@ -1558,7 +1560,6 @@ model3_component = function(pe) {
 		blue_fat_lines_rr,
 	]
 	e.face_renderer = faces_rr
-	e.free = free
 	e.update = update
 
 	return e

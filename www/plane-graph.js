@@ -78,6 +78,82 @@ const {
 
 const v2_near = v2.near
 
+// plane graph segment class -------------------------------------------------
+
+let seg2_class = class s extends Array {
+
+	is_seg2 = true
+
+	constructor(...args) {
+		super(...args)
+		this.set(...args)
+	}
+
+	set(a1, a2) {
+		if (a1) {
+			if (a1.is_seg2) {
+				this[0] = a1[0]
+				this[1] = a1[1]
+			} else {
+				assert(isarray(a1))
+				assert(isarray(a2))
+				this[0] = a1
+				this[1] = a2
+			}
+		} else {
+			this[0] = null
+			this[1] = null
+		}
+	}
+
+	clone() {
+		return new seg2_class([...this[0]], [...this[1]])
+	}
+
+	get x1() { return min(this[0][0], this[1][0]) }
+	get y1() { return min(this[0][1], this[1][1]) }
+	get x2() { return max(this[0][0], this[1][0]) }
+	get y2() { return max(this[0][1], this[1][1]) }
+
+	set x1(x) { let x1i = this[0][0] < this[1][0] ? 0 : 1; this[x1i][0] = x }
+	set y1(y) { let y1i = this[0][1] < this[1][1] ? 0 : 1; this[y1i][1] = y }
+	set x2(x) { let x2i = this[0][0] < this[1][0] ? 1 : 0; this[x2i][0] = x }
+	set y2(y) { let y2i = this[0][1] < this[1][1] ? 1 : 0; this[y2i][1] = y }
+
+	pi(p) {
+		assert(this[0] == p || this[1] == p)
+		return this[0] == p ? 0 : 1
+	}
+
+	// orthogonal segs
+
+	get is_v() { return this[0][0] == this[1][0] }
+	get m1  () { return this.is_v ? this.y1 : this.x1 }
+	get m2  () { return this.is_v ? this.y2 : this.x2 }
+	get axis() { return this.is_v ? this.x1 : this.y1 }
+	set m1  (m) { if (this.is_v) this.y1 = m; else this.x1 = m }
+	set m2  (m) { if (this.is_v) this.y2 = m; else this.x2 = m }
+	set axis(a) {
+		if (this.is_v) {
+			this[0][0] = a
+			this[1][0] = a
+		} else {
+			this[0][1] = a
+			this[1][1] = a
+		}
+	}
+
+	get i1() { let mi = this.is_v ? 1 : 0; return this[0][mi] < this[1][mi] ? 0 : 1 }
+	get i2() { let mi = this.is_v ? 1 : 0; return this[0][mi] < this[1][mi] ? 1 : 0 }
+
+	get p1() { return this[this.i1] }
+	get p2() { return this[this.i2] }
+
+}
+
+function seg2(...args) { return new seg2_class(...args) }
+seg2.class = seg2_class
+
 // cycle base extaction algorihm ---------------------------------------------
 //
 // - input: single component of a simple undirected plane graph. no zero-length
@@ -247,47 +323,6 @@ function extract_outer_cycle_for(comp) {
 	return c
 }
 
-// house plan model utils ----------------------------------------------------
-
-function is_v(seg) { return seg[0][0] == seg[1][0] }
-
-function seg_x1(seg) { return min(seg[0][0], seg[1][0]) }
-function seg_y1(seg) { return min(seg[0][1], seg[1][1]) }
-function seg_x2(seg) { return max(seg[0][0], seg[1][0]) }
-function seg_y2(seg) { return max(seg[0][1], seg[1][1]) }
-
-function set_seg_x1(seg, x) { let x1i = seg[0][0] < seg[1][0] ? 0 : 1; seg[x1i][0] = x }
-function set_seg_y1(seg, y) { let y1i = seg[0][1] < seg[1][1] ? 0 : 1; seg[y1i][1] = y }
-function set_seg_x2(seg, x) { let x2i = seg[0][0] < seg[1][0] ? 1 : 0; seg[x2i][0] = x }
-function set_seg_y2(seg, y) { let y2i = seg[0][1] < seg[1][1] ? 1 : 0; seg[y2i][1] = y }
-
-function seg_axis(seg) { return is_v(seg) ? seg_x1(seg) : seg_y1(seg) }
-function seg_m1  (seg) { return is_v(seg) ? seg_y1(seg) : seg_x1(seg) }
-function seg_m2  (seg) { return is_v(seg) ? seg_y2(seg) : seg_x2(seg) }
-
-function set_seg_m1  (seg, m) { if (is_v(seg)) set_seg_y1(seg, m); else set_seg_x1(seg, m) }
-function set_seg_m2  (seg, m) { if (is_v(seg)) set_seg_y2(seg, m); else set_seg_x2(seg, m) }
-function set_seg_axis(seg, a) {
-	if (is_v(seg)) {
-		seg[0][0] = a
-		seg[1][0] = a
-	} else {
-		seg[0][1] = a
-		seg[1][1] = a
-	}
-}
-
-function seg_pi(seg, p) {
-	assert(seg[0] == p || seg[1] == p)
-	return seg[0] == p ? 0 : 1
-}
-
-function seg_i1(seg) { let mi = is_v(seg) ? 1 : 0; return seg[0][mi] < seg[1][mi] ? 0 : 1 }
-function seg_i2(seg) { let mi = is_v(seg) ? 1 : 0; return seg[0][mi] < seg[1][mi] ? 1 : 0 }
-
-function seg_p1(seg) { return seg[seg_i1(seg)] }
-function seg_p2(seg) { return seg[seg_i2(seg)] }
-
 // plane graph class ---------------------------------------------------------
 
 let point_freelist = freelist(function() {
@@ -298,7 +333,7 @@ let point_freelist = freelist(function() {
 })
 
 let seg_freelist = freelist(function() {
-	let seg = [null, null]
+	let seg = seg2(null, null)
 	return seg
 })
 
@@ -576,7 +611,7 @@ let plane_graph_class = class plane_graph extends Array {
 			p.adj.length = 0
 		for (let p of this.ps)
 			for (let seg of p.segs)
-				p.adj.push(seg[1-seg_pi(seg, p)])
+				p.adj.push(seg[1-seg.pi(p)])
 	}
 
 	_remove_isolated_points() {
@@ -603,8 +638,8 @@ let plane_graph_class = class plane_graph extends Array {
 
 					let s1 = p.segs[0]
 					let s2 = p.segs[1]
-					let s1_pi = seg_pi(s1, p)
-					let s2_p2 = s2[1-seg_pi(s2, p)]
+					let s1_pi = s1.pi(p)
+					let s2_p2 = s2[1-s2.pi(p)]
 					push_log('merging segs:', s1.id, '+', s2.id, '=>', s1.id)
 					this.set_seg_point(s1, s1_pi, s2_p2)
 					this.rem_seg(s2)
@@ -619,12 +654,12 @@ let plane_graph_class = class plane_graph extends Array {
 	// TODO: generalize to angled segs.
 	split_seg_at(seg, m) {
 		push_log('-/-seg:', seg.id, '@', m)
-		let m1 = seg_m1(seg)
-		let m2 = seg_m2(seg)
-		let x = is_v(seg) ? seg_x1(seg) : m
-		let y = is_v(seg) ? m : seg_y1(seg)
+		let m1 = seg.m1
+		let m2 = seg.m2
+		let x = seg.is_v ? seg.x1 : m
+		let y = seg.is_v ? m : seg.y1
 		let new_p = this.add_point(x, y)
-		let old_p = this.set_seg_point(seg, seg_i2(seg), new_p)
+		let old_p = this.set_seg_point(seg, seg.i2, new_p)
 		let new_seg = this.add_seg(new_p, old_p)
 		pop_log()
 	}
@@ -635,15 +670,15 @@ let plane_graph_class = class plane_graph extends Array {
 			return
 		push_log('split all intersecting segs')
 		for (let seg1 of this.segs) {
-			if (is_v(seg1) == v) {
+			if (seg1.is_v == v) {
 				for (let seg2 of this.segs) {
-					if (is_v(seg2) != v) {
-						let m1  = seg_m1(seg1)
-						let m2  = seg_m2(seg1)
-						let bm1 = seg_m1(seg2)
-						let bm2 = seg_m2(seg2)
-						let a   = seg_axis(seg1)
-						let ba  = seg_axis(seg2)
+					if (seg2.is_v != v) {
+						let m1  = seg1.m1
+						let m2  = seg1.m2
+						let bm1 = seg2.m1
+						let bm2 = seg2.m2
+						let a   = seg1.axis
+						let ba  = seg2.axis
 						if (bm1 <= a && bm2 >= a && ba > m1 && ba < m2) {
 							// splitting adds a seg at the end of segs array which will
 							// be also tested in the outer loop and possibly split further.
@@ -700,13 +735,13 @@ let plane_graph_class = class plane_graph extends Array {
 
 
 			// level 1 grouping by direction
-			let v1 = is_v(s1)
-			let v2 = is_v(s2)
+			let v1 = s1.is_v
+			let v2 = s2.is_v
 			let dv = v1 - v2
 			if (dv) return dv
 			// level 2 grouping by axis
-			let m1 = seg_axis(s1)
-			let m2 = seg_axis(s2)
+			let m1 = s1.axis
+			let m2 = s2.axis
 			let dm = m1 - m2
 			if (dm) return dm
 			let i = v1 ? 1 : 0
@@ -741,8 +776,8 @@ let plane_graph_class = class plane_graph extends Array {
 		let i0, v0, m0
 		for (let i = 0, n = this.segs.length; i <= n; i++) {
 			let seg = this.segs[i]
-			let v = seg ? is_v(seg) : null
-			let m = seg ? seg_axis(seg) : null
+			let v = seg ? seg.is_v : null
+			let m = seg ? seg.axis : null
 			if (v0 == null) {
 				i0 = i
 				v0 = v
@@ -752,17 +787,17 @@ let plane_graph_class = class plane_graph extends Array {
 					for (let j = i0+1; j < i; j++) {
 						let seg1 = this.segs[j]
 						let seg0 = this.segs[j-1]
-						let m1_1 = seg_m1(seg1)
-						let m2_0 = seg_m2(seg0)
+						let m1_1 = seg1.m1
+						let m2_0 = seg0.m2
 						if (m1_1 < m2_0) {
 							// seg points that are overlapping segs have no _|_ joints
 							// or they wouldn't be overlapping the seg, so it's safe
 							// to remove the overlapping seg as long as we elongate
 							// the overlapped seg.
 							log('segs overlap:', seg0.id, seg1.id, ':', m1_1, '<=', m2_0,
-								'; seg removed:', seg1.id, '; seg', seg0.id, '.m2 set to:', seg_m2(seg1))
+								'; seg removed:', seg1.id, '; seg', seg0.id, '.m2 set to:', seg1.m2)
 							seg1.removed = true
-							set_seg_m2(seg0, max(seg_m2(seg1), seg_m2(seg0)))
+							seg0.m2 = max(seg1.m2, seg0.m2)
 						}
 					}
 				}
@@ -1049,5 +1084,7 @@ G.plane_graph = function() {
 	return pg_freelist.alloc()
 }
 G.plane_graph.class = plane_graph_class
+
+G.seg2 = seg2
 
 }()) // module scope.

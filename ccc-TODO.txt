@@ -1,3 +1,24 @@
+REFACTORING
+
+	- poly2/3:
+		- get_point() -> at()
+		- get_point3() -> at3()
+		- xy(), xyz()
+	- plane:
+		- refactor xy_quat, xyz_quat API
+			- better yet, reimplement with base vectors
+	- 3d.js: revisit var reuse / out discipline
+
+	- earcut3 ?
+
+	- plane_graph3 ?
+
+	- poly with holes:
+		- hit(): exclude holes
+		- hit_points() ?
+		- hit_edges() ?
+
+
 ROOF EDITOR
 
 	- ??
