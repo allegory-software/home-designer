@@ -286,6 +286,10 @@ ui.box_widget('house_model_editor', {
 
 		let st = ui.state(id)
 		let me = st.get('editor')
+		if (me && house != me.house) {
+			me.free()
+			me = null
+		}
 		me ??= house_model_editor({id: id, house: house})
 		st.set('editor', me)
 		ui.on_free(id, free_house_model_editor)
@@ -321,9 +325,32 @@ ui.box_widget('house_model_editor', {
 		if (dstate && ui.wheel_dy)
 			me.wheel(ui.wheel_dy)
 
-		return ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
-				id, me.draw_state,
-			)
+		ui.stack()
+
+			ui.cmd_box(cmd, fr, align, valign, min_w, min_h,
+					id, me.draw_state,
+				)
+
+			ui.button_stack('', 1, ']', 't')
+			ui.button_bb()
+
+				ui.v(1, ui.sp(), 'l', 't')
+
+					{
+					let state = ui.button_state(id+'.c1')
+					ui.button_icon('fas', '\uf245', state)
+					}
+
+					{
+					let state = ui.button_state(id+'.c2')
+					ui.button_icon('fas', '\uf0b2', state)
+					}
+
+				ui.end_v()
+
+			ui.end_button_stack()
+
+		ui.end_stack()
 
 	},
 

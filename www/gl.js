@@ -1267,6 +1267,11 @@ gl.dyn_arr_buffer = function(type, data_or_cap, inst_div, for_index) {
 	property(dab, 'buffer', () => db.buffer)
 	property(dab, 'invalid', () => da.invalid)
 
+	dab.free = function() {
+		db.free()
+		db = null
+	}
+
 	return dab
 }
 

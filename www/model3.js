@@ -1357,7 +1357,6 @@ model3_component = function(opt, editor) {
 		black_fat_lines_rr    .free()
 		blue_fat_lines_rr     .free()
 
-		camera_ubo            .free()
 	}
 
 	function update_point(pi, p) {

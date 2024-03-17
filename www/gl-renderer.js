@@ -987,9 +987,6 @@ gl.fat_lines_renderer = function(e) {
 	e.free = function() {
 		vao.free()
 		davb.free()
-		pb.free()
-		qb.free()
-		db.free()
 		ib.free()
 	}
 

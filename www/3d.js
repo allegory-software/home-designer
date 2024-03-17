@@ -40,7 +40,7 @@ API
 		len[2] set_len normalize
 		add adds sub subs negate mul muls div divs min max dot cross
 		angle_to distance[2]_to
-		transform(mat3|mat4|quat|plane) rotate project
+		transform(mat3|mat4|quat|plane) rotate project ortho_normal
 		origin zero one up right x|y|z_axis black white
 
 	v4 [x, y, z, w]
@@ -750,6 +750,32 @@ let v3_class = class v extends Array {
 	project(plane, out) {
 		return plane.project_point(this, out)
 	}
+
+	ortho_normal(out) { // see Householder reflectors
+		let [x, y, z] = this
+		let l = sqrt(x * x + y * y + z * z)
+		let s = sign(x)
+		let xt = x + s
+		let dot = -y / (s * xt)
+		out[0] = dot * xt
+		out[1] = 1 + dot * y
+		out[2] = dot * z
+		return out
+	}
+
+	/*
+	// another way to compute this for mere mortals (but slower).
+	function ortho_normal(p) {
+		let [x, y, z] = p
+		let m = max(abs(x), abs(y), abs(z)) // dominant axis
+		if (m == abs(z))
+			return v3(1, 1, -(x + y) / z).normalize()
+		else if (m == abs(y))
+			return v3(1, -(x + z) / y, 1).normalize()
+		else
+			return v3(-(y + z) / x, 1, 1).normalize()
+	}
+	*/
 
 }
 
@@ -2419,6 +2445,50 @@ let plane_class = class plane {
 		return this
 	}
 
+	// TODO: implement the inverse of this (2D->3D) and use it instead of quaternions.
+	xyz_xy_transformer() {
+		let trans = this._xyz_xy_trans
+		if (!trans) {
+			let o = this.origin(v3())
+			let n = this.normal
+			let p = n.ortho_normal(v3())
+			let q = n.clone().cross(p).normalize()
+			assert(near(p.dot(q), 0))
+			assert(near(p.dot(n), 0))
+			assert(near(q.dot(n), 0))
+			// let s = n.dot(d)
+			let out = [0, 0]
+			trans = function(x, y, z) {
+				x -= o[0]
+				y -= o[1]
+				z -= o[2]
+				out[0] = p[0] * x + p[1] * y + p[2] * z
+				out[1] = q[0] * x + q[1] * y + q[2] * z
+				return out
+			}
+			this._xyz_xy_trans = trans
+		}
+		return trans
+	}
+
+	/*
+	use for testing the above....
+	let pl; {
+		pl = plane()
+		pl.set_from_coplanar_points(v3(1, 0, 0), v3(2, 1, 0), v3(2, 1, 1))
+		let r1 = v3(2, 1, 1)
+		let r2 = v3(1, 0, 0)
+		let d3 = r1.distance(r2)
+		let p1 = v2(...pl.xyz_xy_transformer()(...r1))
+		let p2 = v2(...pl.xyz_xy_transformer()(...r2))
+		let d2 = p1.distance(p2)
+		pr(abs(d3 - d2))
+		pr(p1)
+		pr(p2)
+		// v2.zero.distance(v2(x, y)), v3.zero.distance(r))
+	}
+	*/
+
 	// xyz_quat puts 2D points on the plane.
 	xyz_quat() {
 		let q = this._xyz_quat
@@ -2458,7 +2528,7 @@ let plane_class = class plane {
 	}
 
 	transform_xy_xyz(x, y, out) {
-		assert(this.c != null)
+		this.c ??= this.xy_quat().transform(...this.origin(v3()))[2]
 		return this.xyz_quat().transform(x, y, this.c, out)
 	}
 
@@ -2476,7 +2546,7 @@ let plane_class = class plane {
 	invalidate() {
 		this._xy_quat_valid = false
 		this._xyz_quat_valid = false
-		this.c = this.xy_quat().transform(...this.origin(v3()))[2]
+		this._xyz_xy_trans = null
 	}
 
 }
