@@ -14,18 +14,10 @@ let floor_names = [
 ]
 
 let format_length = d => format_kcount(d / 1e2, 2)+'m'
-let format_area = a => format_kcount(abs(a) / 1e4, 2)+'m²'
+let format_area = a => format_kcount(abs(a) / 1e4, 2)+' m\u00b2'
 
-function line_middle(p1, p2) {
-	let [x1, y1] = p1
-	let [x2, y2] = p2
-	return [
-		(x2 + x1) / 2,
-		(y2 + y1) / 2,
-	]
-}
 function seg_center(seg) {
-	return line_middle(seg[0], seg[1])
+	return line2.at(.5, seg[0][0], seg[0][1], seg[1][0], seg[1][1], out)
 }
 
 // shared scale --------------------------------------------------------------
@@ -242,7 +234,7 @@ function draw_length(cx, sg, x1, y1, x2, y2) {
 		x2 = x3
 		y2 = y3
 	}
-	let a = atan2(y2 - y1, x2 - x1)
+	let a = -atan2(y2 - y1, x2 - x1)
 
 	cx.save()
 
@@ -640,7 +632,7 @@ ui.box_widget('floor_editor', {
 				for (let c of co.cycles) {
 					if (c.outer)
 						continue
-					let [x, y] = c.area_pos
+					let [x, y] = c.center()
 					x = sg.x(x)
 					y = sg.y(y)
 					cx.fillStyle = ui.fg_color('label')

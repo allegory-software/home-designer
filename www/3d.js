@@ -2897,7 +2897,6 @@ function offset_corner(p0, p1, p2, d) {
 
 // TODO: use custom create_point()
 // TODO: use get_point() and point_count()
-// TODO: use i1, i2 so we can offset the holes too.
 function poly_offset(ps, d, ops) {
 
 	ops.length = 0
@@ -3041,22 +3040,30 @@ let poly2_class = class poly2 extends Array {
 			let x = 0
 			let y = 0
 			let n = this.length
-			let [x0, y0] = this.get_point(0  , _v2_0)
-			let [x1, y1] = this.get_point(n-1, _v2_0)
-			for (let i = 0; i < n; i++) {
-				let [x2, y2] = this.get_point(i, _v2_0)
+			if (n >= 3) {
+				let [x0, y0] = this.get_point(n-2, _v2_0)
+				let [x1, y1] = this.get_point(n-1, _v2_0)
+				for (let i = 0; i < n; i++) {
+					let [x2, y2] = this.get_point(i, _v2_0)
 
-				let f = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
-				twicearea += f
-				x += (x1 + x2 - 2 * x0) * f
-				y += (y1 + y2 - 2 * y0) * f
+					let f = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
+					twicearea += f
+					x += (x1 + x2 - 2 * x0) * f
+					y += (y1 + y2 - 2 * y0) * f
 
-				x1 = x2
-				y1 = y2
+					x1 = x2
+					y1 = y2
+				}
+				let f = twicearea * 3
+				out[0] = x / f + x0
+				out[1] = y / f + y0
+			} else if (n == 2) {
+				let [x0, y0] = this.get_point(0, _v2_0)
+				let [x1, y1] = this.get_point(1, _v2_0)
+				line2.at(.5, x0, y0, x1, y1, out)
+			} else if (n == 1) {
+				this.get_point(0, out)
 			}
-			let f = twicearea * 3
-			out[0] = x / f + x0
-			out[1] = y / f + y0
 			this._center_valid = true
 		}
 		return out
@@ -3067,20 +3074,17 @@ let poly2_class = class poly2 extends Array {
 			let s = 0
 			let n = this.length
 			if (n >= 3) {
-				let [x0, y0] = this.get_point(n-2, _v2_0)
 				let [x1, y1] = this.get_point(n-1, _v2_0)
 				for (let i = 0; i < n; i++) {
 					let [x2, y2] = this.get_point(i, _v2_0)
 
-					s += x1 * y2 - y0
+					s += (x1 * y2 * .5) - (x2 * y1 * .5)
 
-					x0 = x1
-					y0 = y1
 					x1 = x2
 					y1 = y2
 				}
 			}
-			this._area = s / 2
+			this._area = s
 		}
 		return this._area
 	}

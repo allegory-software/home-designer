@@ -414,50 +414,52 @@ function house_plan(t) {
 			let m_snap_lines = move_freely && snap_lines_for(!seg.is_v, seg)
 
 			// find all affected _|_ edges so we can show their lengths as we move the seg
-			{
-			let perp_edges = []
-			// find the farthest edge point from `c.edges[i0]` going in `dir` direction
-			// in the array, which has the same spatial direction `v` with the previous point.
-			function last_perp_edge_point(c, i, n, dir, v) {
-				let ep0 = c.edges[mod(i, n)]
-				while (1) {
-					let ep1 = c.edges[mod(i, n)]
-					let ep2 = c.edges[mod(i+dir, n)]
-					if (ep2.p == ep0.p) // end-cap, don't measure
-						return
-					if ((ep1[0] == ep2[0]) != v) // changed direction, return last edge point
-						return ep1
-					i += dir
-				}
-			}
-			let sp1 = seg[0]
-			let sp2 = seg[1]
-			let v = seg.is_v
-			for (let co of floor.comps) {
-				for (let c of co.cycles) {
-					for (let i = 0, n = c.edges.length; i <= n; i++) {
-						let ep1 = c.edges[(i+0) % n]
-						let ep2 = c.edges[(i+1) % n]
-						if (!(ep1.p == sp1 && ep2.p == sp2 || ep1.p == sp2 && ep2.p == sp1)) // not seg's edge
-							continue
-						let ep0 = last_perp_edge_point(c, i+0, n, -1, !v)
-						let ep3 = last_perp_edge_point(c, i+1, n,  1, !v)
-						if (!(ep0 || ep3))
-							continue
-						if (0) {
-							// remove measurement of parallel wall of the same length
-							let A = v ? 0 : 1 // index of cross axis of perp segs
-							let dupe = ep0 && ep3 && ep0.p[A] == ep3.p[A]
-							if (dupe)
-								ep3 = null
-						}
-						if (ep0) perp_edges.push([ep0, ep1])
-						if (ep3) perp_edges.push([ep2, ep3])
+			function update_measure_edges() {
+				let perp_edges = []
+				// find the farthest edge point from `c.edges[i0]` going in `dir` direction
+				// in the array, which has the same spatial direction `v` with the previous point.
+				function last_perp_edge_point(c, i, n, dir, v) {
+					let ep0 = c.edges[mod(i, n)]
+					while (1) {
+						let ep1 = c.edges[mod(i, n)]
+						let ep2 = c.edges[mod(i+dir, n)]
+						if (ep2.p == ep0.p) // end-cap, don't measure
+							return
+						if ((ep1[0] == ep2[0]) != v) // changed direction, return last edge point
+							return ep1
+						i += dir
 					}
 				}
+				let sp1 = seg[0]
+				let sp2 = seg[1]
+				let v = seg.is_v
+				for (let co of floor.comps) {
+					for (let c of co.cycles) {
+						for (let i = 0, n = c.edges.length; i <= n; i++) {
+							let ep1 = c.edges[(i+0) % n]
+							let ep2 = c.edges[(i+1) % n]
+							if (!(ep1.p == sp1 && ep2.p == sp2 || ep1.p == sp2 && ep2.p == sp1)) // not seg's edge
+								continue
+							let ep0 = last_perp_edge_point(c, i+0, n, -1, !v)
+							let ep3 = last_perp_edge_point(c, i+1, n,  1, !v)
+							if (!(ep0 || ep3))
+								continue
+							if (0) {
+								// remove measurement of parallel wall of the same length
+								let A = v ? 0 : 1 // index of cross axis of perp segs
+								let dupe = ep0 && ep3 && ep0.p[A] == ep3.p[A]
+								if (dupe)
+									ep3 = null
+							}
+							if (ep0) perp_edges.push([ep0, ep1])
+							if (ep3) perp_edges.push([ep2, ep3])
+						}
+					}
+				}
+				draw_state.measure_edges = perp_edges
 			}
-			draw_state.measure_edges = perp_edges
-			}
+
+			update_measure_edges()
 
 			let s = {}
 
@@ -499,6 +501,7 @@ function house_plan(t) {
 					a = sa ?? a
 					seg.axis = a
 					create_edges()
+					update_measure_edges()
 
 				}
 

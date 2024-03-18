@@ -979,6 +979,7 @@ let plane_graph_class = class plane_graph extends Array {
 		if (c.islands)
 			c.islands.length = 0
 		c.outer = null
+		c.invalidate()
 		cycle_freelist.free(c)
 	}
 
