@@ -37,6 +37,9 @@ let glue_log = log
 
 function model3_editor(e) {
 
+	e.cursors_dir  ??= 'cursors'
+	e.skybox_dir   ??= 'skybox'
+
 	e.prop = function(k, t) {
 		e[k] = t.default
 	}
@@ -992,12 +995,12 @@ function model3_editor(e) {
 	if (e.skybox) {
 		skybox = gl.skybox({
 			images: {
-				posx: '../www/skybox/skybox_posx.jpg',
-				negx: '../www/skybox/skybox_negx.jpg',
-				posy: '../www/skybox/skybox_posy.jpg',
-				negy: '../www/skybox/skybox_negy.jpg',
-				posz: '../www/skybox/skybox_posz.jpg',
-				negz: '../www/skybox/skybox_negz.jpg',
+				posx: e.skybox_dir+'/skybox_posx.jpg',
+				negx: e.skybox_dir+'/skybox_negx.jpg',
+				posy: e.skybox_dir+'/skybox_posy.jpg',
+				negy: e.skybox_dir+'/skybox_negy.jpg',
+				posz: e.skybox_dir+'/skybox_posz.jpg',
+				negz: e.skybox_dir+'/skybox_negz.jpg',
 			},
 		})
 		skybox.addEventListener('load', function() {
@@ -1037,7 +1040,7 @@ function model3_editor(e) {
 		cursor = name
 		let x = offsets[name] && offsets[name][0] || 0
 		let y = offsets[name] && offsets[name][1] || 0
-		e.cursor_url = builtin_cursors[name] ? name : 'url(../www/cursors/cursor_'+name+'.'+(cursor_ext[name] ?? 'png')+') '+x+' '+y+', auto'
+		e.cursor_url = builtin_cursors[name] ? name : 'url('+e.cursors_dir+'/cursor_'+name+'.'+(cursor_ext[name] ?? 'png')+') '+x+' '+y+', auto'
 	})
 	}
 

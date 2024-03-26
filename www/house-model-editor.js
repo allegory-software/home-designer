@@ -290,7 +290,10 @@ ui.box_widget('house_model_editor', {
 			me.free()
 			me = null
 		}
-		me ??= house_model_editor({id: id, house: house})
+		me ??= house_model_editor({id: id, house: house,
+			cursors_dir : ui.cursors_dir,
+			skybox_dir  : ui.skybox_dir,
+		})
 		st.set('editor', me)
 		ui.on_free(id, free_house_model_editor)
 

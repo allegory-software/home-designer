@@ -4480,7 +4480,8 @@ let Math3D = {
 }
 G.Math3D = Math3D
 
-if (document.currentScript.hasAttribute('global')) {
+let script_attr = k => document.currentScript.hasAttribute(k)
+if (script_attr('global') || script_attr('3d-global')) {
 	for (let k in Math3D) {
 		assert(!(k in G), k, ' global already exists')
 		G[k] = Math3D[k]
