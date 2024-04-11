@@ -7,9 +7,6 @@ local function hd_schema()
 
 end
 
-require'glue'
-config('www_dirs', 'www;sdk/www;sdk/canvas-ui/www')
-
 local xapp = require'xapp'
 
 local hd = xapp(...)
@@ -34,7 +31,7 @@ house-model-editor.js
 tests.js
 ]]
 
-htmlfiles'hd.html'
+htmlfile'hd.html'
 
 hd.schema:import(hd_schema)
 
