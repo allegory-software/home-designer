@@ -1,6 +1,5 @@
 /var/
 /tmp/
-/sdk
 /*.log
 /*.pid
 /*.conf

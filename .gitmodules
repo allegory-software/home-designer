@@ -1,0 +1,4 @@
+[submodule "sdk"]
+	path = sdk
+	url = git@github.com:allegory-software/allegory-sdk.git
+	branch = dev
