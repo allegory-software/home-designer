@@ -35,4 +35,4 @@ htmlfile'hd.html'
 
 hd.schema:import(hd_schema)
 
-return hd:run()
+exit(hd:run())
