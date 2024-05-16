@@ -1,5 +1,5 @@
---go@ x:\sdk\bin\windows\luajit.exe -lscite x:\hd\hd.lua -vv run
---go@ plink d10 strace ~/sdk/bin/linux/luajit -lscite ~/hd/hd.lua -v start
+--go @ x:\sdk\bin\windows\luajit.exe -lscite x:\hd\hd.lua -vv run
+--go @ plink d10 strace ~/sdk/bin/linux/luajit -lscite ~/hd/hd.lua -v start
 
 local function hd_schema()
 
