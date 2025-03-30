@@ -357,14 +357,16 @@ ui.box_widget('house_model_editor', {
 
 	},
 
-	after_position: function(a, i, axis)	{
+	position: function(a, i, axis, sx, sw) {
+		ui.box_position(a, i, axis, sx, sw)
 		let w  = a[i+2]
 		let h  = a[i+3]
 		let id = a[i+MODEL_EDITOR_ID]
 		//
 	},
 
-	after_translate: function(a, i) {
+	translate: function(a, i, dx, dy) {
+		ui.box_translate(a, i, dx, dy)
 		let x = a[i+0]
 		let y = a[i+1]
 		let w = a[i+2]

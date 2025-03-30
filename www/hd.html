@@ -51,7 +51,7 @@ ui.main = function() {
 				DEBUG_PLAN = !DEBUG_PLAN
 
 			if (ui.button('btn_light', 'lights', 0))
-				ui.default_theme = ui.default_theme == 'light' ? 'dark' : 'light'
+				ui.set_default_theme(ui.default_theme == 'light' ? 'dark' : 'light')
 
 		ui.end_h()
 

@@ -447,7 +447,8 @@ ui.box_widget('floor_editor', {
 
 	},
 
-	after_position: function(a, i, axis)	{
+	position: function(a, i, axis, sx, sw)	{
+		ui.box_position(a, i, axis, sx, sw)
 		let sg = scale_group('editor')
 		if (!axis) {
 			sg.set_scale(1/0)
@@ -460,7 +461,8 @@ ui.box_widget('floor_editor', {
 		sg.scale_to_fit(plan.house.bb, w, h)
 	},
 
-	after_translate: function(a, i) {
+	translate: function(a, i, dx, dy) {
+		ui.box_translate(a, i, dx, dy)
 		let x00 = a[i+0]
 		let y00 = a[i+1]
 		let id = a[i+FLOOR_VIEW_ID]
@@ -500,6 +502,7 @@ ui.box_widget('floor_editor', {
 		let w     = a[i+2]
 		let h     = a[i+3]
 		let id    = a[i+FLOOR_VIEW_ID]
+
 		let draw_state = a[i+FLOOR_VIEW_DRAW_STATE]
 		let x0 = draw_state.x0
 		let y0 = draw_state.y0
